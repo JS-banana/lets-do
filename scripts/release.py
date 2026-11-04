@@ -41,7 +41,13 @@ def run(name, command, *, allowed_failure=False):
         result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
     except OSError:
         raise RuntimeError(f"{name} could not start; required runner tools are missing.") from None
-    log.write_text(result.stdout + "\n--- stderr ---\n" + result.stderr)
+    diagnostic = result.stdout + "\n--- stderr ---\n" + result.stderr
+    token = os.environ.get("GH_TOKEN")
+    if token:
+        diagnostic = diagnostic.replace(token, "[redacted]")
+    log.write_text(diagnostic)
+    if result.returncode and not allowed_failure:
+        print(f"{name}: {diagnostic[-4000:]}", file=sys.stderr)
     require(result.returncode == 0 or allowed_failure, f"{name} failed; raw logs remain local and are not published.")
     return result
 
@@ -107,11 +113,15 @@ def publish(tag, commit, asset_dir):
     release_id = None
     published = False
     try:
-        run("create-draft", ["gh", "release", "create", tag, "--repo", repository, "--verify-tag", "--draft", "--prerelease",
-                             "--latest=false", "--target", commit, "--title", f"Let's Do {tag} (preview)", "--notes-file", str(notes)])
-        release = json.loads(run("draft-details", ["gh", "api", f"{endpoint}/tags/{tag}"]).stdout)
-        require(release.get("draft") is True, "The new release must remain a draft until all assets are verified.")
+        payload = logs / "draft.json"
+        payload.write_text(json.dumps({"tag_name": tag, "target_commitish": commit,
+            "name": f"Let's Do {tag} (preview)", "body": notes.read_text(),
+            "draft": True, "prerelease": True, "make_latest": "false"}))
+        # The tag endpoint omits drafts; retain the ID returned by creation.
+        release = json.loads(run("create-draft", ["gh", "api", "--method", "POST", endpoint,
+                                                 "--input", str(payload)]).stdout)
         release_id = release["id"]
+        require(release.get("draft") is True, "The new release must remain a draft until all assets are verified.")
         run("upload-assets", ["gh", "release", "upload", tag, "--repo", repository] + [str(path) for path in assets])
         uploaded = json.loads(run("uploaded-assets", ["gh", "api", f"{endpoint}/{release_id}"]).stdout)
         actual = {asset["name"]: asset for asset in uploaded["assets"]}
