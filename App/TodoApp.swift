@@ -1,14 +1,20 @@
+import Foundation
 import SwiftUI
 
 @main
 struct TodoApp: App {
     @StateObject private var model = PrototypeModel()
     @Environment(\.scenePhase) private var scenePhase
+    private let isUnitTestHost = ProcessInfo.processInfo.environment["M0_UNIT_TEST_HOST"] == "1"
 
     var body: some Scene {
         WindowGroup("Let’s Do", id: "main") {
             PrototypeView(model: model)
-                .task { if !model.loaded { await model.start() } }
+                .task {
+                    // Hosted tests open their own temporary TaskStore instances.
+                    guard !isUnitTestHost else { return }
+                    if !model.loaded { await model.start() }
+                }
                 #if os(macOS)
                 .frame(minWidth: 680, minHeight: 560)
                 .handlesExternalEvents(preferring: ["\(AppDestination.scheme)://task", "\(AppDestination.scheme)://calendar", "\(AppDestination.scheme)://open"],
@@ -27,7 +33,8 @@ struct TodoApp: App {
         }
         #if os(macOS)
         WindowGroup("添加任务", id: "capture", for: String.self) { _ in
-            QuickCaptureView(model: model)
+            // A restored capture scene has its own automatic startup task.
+            if !isUnitTestHost { QuickCaptureView(model: model) }
         } defaultValue: { "capture" }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)

@@ -21,6 +21,8 @@ Local 的手工库位于用户 Application Support 下的 `TodoM0/Local/local-ma
 
 iPhone 使用 `TodoM0iPhone`。`TodoM0Distribution` 的运行和归档使用 `MacDistribution`，Test Action 使用 `Local`；单元测试通过不代表分发配置或系统容器权限已经通过运行验收。
 
+Mac 的 XCTest 宿主通过测试 scheme 的 `M0_UNIT_TEST_HOST=1` 跳过自动开库；测试自行创建临时 TaskStore，不打开手工库。
+
 MacDistribution 主应用保留非沙盒运行方式，Widget 保留沙盒。其命名空间、容器访问、旧 Local 升级与真实验收规则集中在 [Mac 分发说明](MAC-DISTRIBUTION.md)。自动运行名称必须以字母或数字开头，最多 70 个字母、数字或连字符；分发配置会拒绝缺值、重复参数、非法名称及保留名称，不回落手工库。
 
 需要开发团队能力时，将 [Signing.example.xcconfig](../Config/Signing.example.xcconfig) 复制为 `Config/Signing.local.xcconfig`，填写自己的团队及已注册标识；本机文件不入库。这是 DesktopLocal／CloudDevelopment 的设置，不是构建 MacDistribution 的前提。App Group 权限不能通过随机 Team ID 或自签名替代。
