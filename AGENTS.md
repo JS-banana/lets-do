@@ -14,7 +14,7 @@
 - `python3 scripts/check.py build`：Local Mac、iPhone 模拟器／设备编译。
 - `python3 scripts/check.py cloud-build`：CloudDevelopment 无签名编译，不代表云能力已可使用。
 - `python3 scripts/check.py desktop-compile`：DesktopLocal App 与 Widget 无签名编译。
-- `python3 scripts/package-mac.py`：签名、检查和打包 Mac 本机发行版，需要有效的团队签名。
+- `python3 scripts/package-mac.py`：构建、校验并打包无证书的 Mac Local 主应用。
 - 日志与报告保存在被忽略的 `.build/`；不提交本机配置、凭据、数据库、原始设备标识或个人内容。
 
 ## 数据与系统接入
@@ -23,4 +23,4 @@
 - 写入复用 `Shared/TaskStore.swift`；修改日期、存储、Intent 时检查共同规则与调用方。
 - 主应用负责建库、迁移和云镜像；扩展只打开已核验的共享库，不建库、不迁移、不持有云镜像。
 - 正文版本保持不可变，删除使用 tombstone；保留草稿及错误恢复能力。账户或模型检查失败时阻断危险写入，不删库重建或跨账户搬库。
-- 不通过伪造 Team ID、移除权限验证或关闭系统保护来获得 Widget 共享能力。未配置有效签名时，只能证明编译，不能把无签名构建当完整发行包。
+- 不通过伪造 Team ID、移除权限验证或关闭系统保护来获得 Widget 共享能力。公开下载版使用 Local 主应用与 ad hoc 完整性签名，不包含系统 Widget；不要把它与有团队共享权限的 DesktopLocal 混为一谈。

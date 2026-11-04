@@ -20,7 +20,7 @@ Local 默认将任务放在用户 Application Support 下的 `TodoM0/Local/local
 
 需要签名时，将 `Config/Signing.example.xcconfig` 复制为 `Config/Signing.local.xcconfig`，填写自己的团队及标识。该文件不入版本管理。DesktopLocal 的共享组使用实际 Team ID 前缀；不能通过随意填写 Team ID 或自签证书获得相同权限。
 
-Mac 桌面 scheme 为 `TodoM0Desktop`，iPhone scheme 为 `TodoM0iPhone`。从源码自签 iPhone 本机版可以使用 Personal Team；免费配置有有效期与能力限制，不能等同于公开 iPhone 分发。CloudKit 使用设备系统 Apple 账户，不实现另一套账号密码。
+公开下载包使用 Local 主应用，不需要团队证书，不嵌入系统 Widget。源码中的 Mac 桌面 scheme 为 `TodoM0Desktop`，iPhone scheme 为 `TodoM0iPhone`。从源码自签 iPhone 本机版可以使用 Personal Team；免费配置有有效期与能力限制，不能等同于公开 iPhone 分发。CloudKit 使用设备系统 Apple 账户，不实现另一套账号密码。
 
 ## 检查
 
