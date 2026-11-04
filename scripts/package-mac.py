@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Build a signed, local-only Mac app and retain a drag-to-install DMG."""
+"""Build the certificate-free Local Mac app and create DMG/ZIP release assets."""
 import argparse
 import datetime
 import hashlib
 import json
-import os
 from pathlib import Path
 import plistlib
 import re
@@ -53,27 +52,20 @@ def source_hashes():
     return sources
 
 
-def signing_configuration_hash():
-    path = ROOT / "Config" / "Signing.local.xcconfig"
-    return sha256(path) if path.is_file() else None
-
-
 source_before = source_hashes()
-signing_before = signing_configuration_hash()
 report = {
     "timestamp": stamp,
     "kind": "package-mac",
-    "configuration": "DesktopLocal",
+    "configuration": "Local",
     "status": "failed",
     "sourceSHA256": source_before,
     "results": [],
     "signatureChecks": [],
     "acceptanceBoundary": {
-        "scope": "Signed Mac DesktopLocal build and packaging checks; no software is installed or launched.",
-        "notVerified": ["GUI", "system Widget runtime", "another Mac", "CloudKit", "Gatekeeper approval"],
-        "distribution": "Not notarized. The manifest records the actual certificate type; packaging does not grant Gatekeeper approval.",
+        "scope": "Certificate-free Local Mac app; no system Widget or cloud library is included.",
+        "notVerified": ["GUI", "another Mac", "Gatekeeper approval"],
+        "distribution": "Ad hoc integrity signature, not notarized. macOS may require explicit approval to open the app.",
         "sideEffects": "No app installation, launch, removal or system registration is performed.",
-        "privacy": "Signing accounts, certificate identities and local signing configuration are retained only in local build logs, not this report.",
     },
 }
 
@@ -104,31 +96,24 @@ def run(name, command, capture=False):
 
 
 def inspect_signature(path, name):
-    run(f"verify-{name}", ["codesign", "--verify", "--strict", "--verbose=2", str(path)])
+    run(f"verify-{name}", ["codesign", "--verify", "--all-architectures", "--strict", "--verbose=2", str(path)])
     description = run(f"signature-{name}", ["codesign", "-d", "--verbose=4", str(path)], capture=True)
     match = re.search(r"^TeamIdentifier=(.+)$", description, re.MULTILINE)
     team = match.group(1).strip() if match else None
-    require(team and team != "not set" and "Signature=adhoc" not in description,
-            f"{name} needs the existing development signing identity; ad hoc signing is insufficient.")
-    signature_type = next((kind for kind in ("Apple Development", "Developer ID Application")
-                           if f"Authority={kind}:" in description), None)
-    require(signature_type, f"{name} has an unsupported signing certificate type.")
+    require(team in (None, "not set") and "Signature=adhoc" in description and
+            not re.search(r"^Authority=", description, re.MULTILINE),
+            f"{name} must have an ad hoc integrity signature without a certificate or team.")
     raw = run(f"entitlements-{name}", ["codesign", "-d", "--entitlements", ":-", str(path)], capture=True)
     start, end = raw.find("<?xml"), raw.rfind("</plist>")
     require((start < 0 and end < 0) or (start >= 0 and end >= start),
             f"Cannot inspect {name} entitlements.")
     entitlements = plistlib.loads(raw[start:end + len("</plist>")].encode()) if start >= 0 else {}
-    require("com.apple.security.get-task-allow" not in entitlements,
-            f"{name} still contains the debugging entitlement get-task-allow.")
-    cloud_keys = [key for key in entitlements
-                  if any(word in key.lower() for word in ("icloud", "cloudkit", "ubiquity", "aps-environment"))]
-    require(not cloud_keys, f"{name} unexpectedly contains cloud or push entitlements.")
+    require(not entitlements, f"{name} must not contain cloud, shared-group, debugging or other entitlements.")
     report["signatureChecks"].append({
         "path": str(path.relative_to(workspace)), "strictSignaturePassed": True,
-        "hasSigningTeam": True, "signatureType": signature_type,
-        "getTaskAllowAbsent": True, "cloudEntitlementsAbsent": True,
+        "hasSigningTeam": False, "signatureType": "ad-hoc", "certificateAbsent": True,
+        "getTaskAllowAbsent": True, "cloudEntitlementsAbsent": True, "sharedGroupEntitlementsAbsent": True,
     })
-    return team, entitlements, signature_type
 
 
 exit_code = 1
@@ -138,71 +123,69 @@ try:
     require(output.suffix.lower() == ".dmg", "--output must name a .dmg file.")
     require(not any(path.exists() or path.is_symlink() for path in (output, archive, manifest_path, sums_path)),
             "An output asset already exists; choose a new directory.")
-    require(re.search(r"#if\s+os\(macOS\)\s*&&\s*M0_DESKTOP\b",
+    require(re.search(r"#if\s+M0_LOCAL\b",
                       (ROOT / "Shared" / "StoreSession.swift").read_text()),
-            "The DesktopLocal storage macro changed; review the packaging compilation conditions first.")
+            "The Local storage macro changed; review the packaging compilation conditions first.")
     run("xcode", ["xcodebuild", "-version"])
-    overrides = []
-    expected_team = os.environ.get("DEVELOPMENT_TEAM", "")
-    prefix = os.environ.get("M0_BUNDLE_PREFIX", "")
-    identity = os.environ.get("CODE_SIGN_IDENTITY", "Apple Development")
-    require(identity and identity != "-" and not any(c in identity for c in "\r\n\0"), "Invalid signing selector.")
-    overrides.append("CODE_SIGN_IDENTITY=" + identity)
-    if expected_team:
-        require(re.fullmatch(r"[A-Z0-9]{10}", expected_team), "Invalid DEVELOPMENT_TEAM.")
-        overrides.append("DEVELOPMENT_TEAM=" + expected_team)
-    if prefix:
-        require(re.fullmatch(r"(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z0-9][A-Za-z0-9-]*", prefix), "Invalid M0_BUNDLE_PREFIX.")
-        overrides.append("M0_BUNDLE_PREFIX=" + prefix)
-    run("mac-desktop-build", [
+    run("mac-local-build", [
         "xcodebuild", "-project", "Todo.xcodeproj", "-jobs", "4",
-        "-scheme", "TodoM0Desktop", "-configuration", "DesktopLocal",
+        "-scheme", "TodoM0Mac", "-configuration", "Local",
         "-destination", "generic/platform=macOS", "-derivedDataPath", str(workspace / "DerivedData"),
         "build", "ARCHS=arm64 x86_64", "ONLY_ACTIVE_ARCH=NO",
-        "SWIFT_ACTIVE_COMPILATION_CONDITIONS=M0_DESKTOP", "SWIFT_OPTIMIZATION_LEVEL=-O",
+        "SWIFT_ACTIVE_COMPILATION_CONDITIONS=M0_LOCAL", "SWIFT_OPTIMIZATION_LEVEL=-O",
         "SWIFT_COMPILATION_MODE=wholemodule", "ENABLE_DEBUG_DYLIB=NO", "ENABLE_TESTABILITY=NO",
-        "CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO",
-    ] + overrides)
-    app = workspace / "DerivedData" / "Build" / "Products" / "DesktopLocal" / "Let's Do.app"
-    widget = app / "Contents" / "PlugIns" / "TodoM0MacWidget.appex"
-    require(app.is_dir() and widget.is_dir(), "The Mac app or embedded Widget is missing.")
+        "DEVELOPMENT_TEAM=", "CODE_SIGN_IDENTITY=-", "CODE_SIGNING_ALLOWED=NO", "CODE_SIGN_ENTITLEMENTS=",
+        "CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO", "M0_APP_GROUP=", "M0_CLOUD_CONTAINER=",
+        "M0_BUNDLE_PREFIX=com.panion.todo.m0", "M0_URL_SCHEME=todom0",
+    ])
+    app = workspace / "DerivedData" / "Build" / "Products" / "Local" / "Let's Do.app"
+    require(app.is_dir(), "The Mac app is missing.")
+    # The shared Xcode target embeds a Widget even for Local. Remove only the newly built
+    # extensions before signing; the download must not register unusable system Widgets.
+    plugins = app / "Contents" / "PlugIns"
+    removed = list(plugins.glob("*.appex"))
+    for extension in removed:
+        if extension.is_symlink():
+            extension.unlink()
+        else:
+            shutil.rmtree(extension)
+    if plugins.is_dir() and not any(plugins.iterdir()):
+        plugins.rmdir()
+    require(not list(app.rglob("*.appex")), "A system extension remains in the Local download.")
+    report["removedExtensionCount"] = len(removed)
     info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
-    widget_info = plistlib.loads((widget / "Contents" / "Info.plist").read_bytes())
-    require(str(info.get("CFBundleIdentifier", "")).endswith(".mac.desktop"), "Unexpected app identity.")
-    require(not prefix or info["CFBundleIdentifier"] == prefix + ".mac.desktop", "The bundle-prefix override was not applied.")
+    require(info.get("CFBundleIdentifier") == "com.panion.todo.m0.mac", "Unexpected Local app identity.")
     require(info.get("CFBundleShortVersionString") == version, "The built version does not match MARKETING_VERSION.")
-    require(widget_info.get("CFBundleIdentifier") == info["CFBundleIdentifier"] + ".widget",
-            "The Widget does not match the desktop app identity.")
-    require(not info.get("M0CloudContainer") and not widget_info.get("M0CloudContainer"),
-            "Desktop packaging must not select a CloudKit container.")
-    require(widget_info.get("NSExtension", {}).get("NSExtensionPointIdentifier") == "com.apple.widgetkit-extension",
-            "The embedded extension is not a WidgetKit extension.")
-    require(not list(app.rglob("*.provisionprofile")), "Unexpected provisioning profile in the desktop package.")
+    require(not info.get("M0CloudContainer") and not info.get("M0AppGroup"), "Local packaging must not select cloud or shared storage.")
+    require(not list(app.rglob("*.provisionprofile")) and not list(app.rglob("*.mobileprovision")), "Unexpected provisioning profile in the Local package.")
     debug_dylibs = [path for path in app.rglob("*.dylib")
                    if path.name == "__preview.dylib" or path.name.endswith(".debug.dylib")]
     require(not debug_dylibs, "The package still contains a debug or preview dylib.")
     report["debugDylibsAbsent"] = True
-    run("verify-app-deep", ["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)])
-    app_team, app_entitlements, signature_type = inspect_signature(app, "app")
-    widget_team, widget_entitlements, widget_signature_type = inspect_signature(widget, "widget")
-    groups = app_entitlements.get("com.apple.security.application-groups")
-    require(app_team == widget_team and signature_type == widget_signature_type and
-            (not expected_team or app_team == expected_team), "App, Widget and requested signing teams must match.")
-    require(app_entitlements.get("com.apple.security.app-sandbox") is True and
-            widget_entitlements.get("com.apple.security.app-sandbox") is True, "App and Widget must remain sandboxed.")
-    require(groups == [app_team + ".com.panion.todo.m0.desktop"] and
-            widget_entitlements.get("com.apple.security.application-groups") == groups and
-            info.get("M0AppGroup") == groups[0] and widget_info.get("M0AppGroup") == groups[0],
-            "App and Widget must share the same non-provisioned, team-prefixed desktop App Group.")
-    report["sharedGroupVerified"] = True
+    # Apply ad hoc signatures to nested Mach-O code before sealing the main bundle.
+    magic = {bytes.fromhex(value) for value in ("feedface", "cefaedfe", "feedfacf", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca")}
+    code = []
+    for path in app.rglob("*"):
+        if path.is_file() and not path.is_symlink():
+            with path.open("rb") as stream:
+                if stream.read(4) in magic:
+                    code.append(path)
+    binary = app / "Contents" / "MacOS" / info["CFBundleExecutable"]
+    require(binary in code, "The main Mach-O executable is missing.")
+    for index, path in enumerate(sorted(code, key=lambda item: len(item.parts), reverse=True), 1):
+        run(f"ad-hoc-code-{index}", ["codesign", "--force", "--sign", "-", "--timestamp=none", "--options", "runtime", str(path)])
+    for index, framework in enumerate(sorted(app.rglob("*.framework"), key=lambda item: len(item.parts), reverse=True), 1):
+        run(f"ad-hoc-framework-{index}", ["codesign", "--force", "--sign", "-", "--timestamp=none", str(framework)])
+    run("ad-hoc-app", ["codesign", "--force", "--sign", "-", "--timestamp=none", "--options", "runtime", str(app)])
+    run("verify-app-deep", ["codesign", "--verify", "--all-architectures", "--deep", "--strict", "--verbose=2", str(app)])
+    inspect_signature(app, "app")
     report["architectureSlices"] = {}
-    for name, bundle, bundle_info in (("app", app, info), ("widget", widget, widget_info)):
-        binary = bundle / "Contents" / "MacOS" / bundle_info["CFBundleExecutable"]
-        slices = run(f"architectures-{name}", ["lipo", "-archs", str(binary)], capture=True).strip().split()
-        require(set(slices) == {"arm64", "x86_64"}, f"{name} is not a universal Intel / Apple silicon binary.")
-        report["architectureSlices"][name] = sorted(slices)
-    for index, dylib in enumerate(sorted(app.rglob("*.dylib"))):
-        inspect_signature(dylib, f"dylib-{index + 1}")
+    for index, path in enumerate(code, 1):
+        slices = run(f"architectures-code-{index}", ["lipo", "-archs", str(path)], capture=True).strip().split()
+        require(set(slices) == {"arm64", "x86_64"}, "Every embedded code object must be universal.")
+        inspect_signature(path, f"code-{index}")
+        if path == binary:
+            report["architectureSlices"]["app"] = sorted(slices)
 
     staging = workspace / "staging"
     staging.mkdir()
@@ -211,7 +194,7 @@ try:
     (staging / "Applications").symlink_to("/Applications", target_is_directory=True)
     require((ROOT / "LICENSE").is_file(), "The release LICENSE is missing.")
     shutil.copy2(ROOT / "LICENSE", staging / "LICENSE")
-    run("verify-staged-app", ["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(staged_app)])
+    run("verify-staged-app", ["codesign", "--verify", "--all-architectures", "--deep", "--strict", "--verbose=2", str(staged_app)])
     output.parent.mkdir(parents=True, exist_ok=True)
     run("create-dmg", ["hdiutil", "create", "-fs", "HFS+", "-format", "UDZO", "-volname", "Let's Do",
                        "-srcfolder", str(staging), str(output)])
@@ -223,7 +206,7 @@ try:
         "path": str(output), "sha256": sha256(output), "bytes": output.stat().st_size,
         "format": "UDZO", "filesystem": "HFS+", "readOnlyVolume": True,
         "contents": ["Let's Do.app", "Applications -> /Applications", "LICENSE"],
-        "appBundleIdentifier": info["CFBundleIdentifier"], "widgetBundleIdentifier": widget_info["CFBundleIdentifier"],
+        "appBundleIdentifier": info["CFBundleIdentifier"],
         "version": info["CFBundleShortVersionString"], "build": info["CFBundleVersion"],
     }
     commit_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True)
@@ -232,15 +215,14 @@ try:
     manifest = {
         "schemaVersion": 1, "version": version, "build": info["CFBundleVersion"], "sourceCommit": commit,
         "sourceIsClean": dirty.returncode == 0 and not dirty.stdout.strip(), "sourceSHA256": source_before,
-        "configuration": "DesktopLocal", "architectures": report["architectureSlices"],
-        "signatureType": signature_type, "notarized": False, "cloudEnabled": False, "widgetIncluded": True,
-        "verification": {"strictDeepSignature": True, "sharedGroup": True, "getTaskAllowAbsent": True,
-                         "debugDylibsAbsent": True, "dmgVerified": True},
-        "runtimeAcceptance": "Build and package checks only; GUI and system Widget behavior require separate testing.",
+        "configuration": "Local", "architectures": report["architectureSlices"],
+        "signatureType": "ad-hoc", "notarized": False, "cloudEnabled": False, "widgetIncluded": False,
+        "verification": {"strictDeepSignature": True, "certificateAbsent": True, "sharedGroupEntitlementsAbsent": True,
+                         "getTaskAllowAbsent": True, "debugDylibsAbsent": True, "widgetAbsent": True, "dmgVerified": True},
+        "runtimeAcceptance": "Build and package checks only; GUI and opening on another Mac require separate testing.",
         "artifacts": [{"name": path.name, "sha256": sha256(path), "bytes": path.stat().st_size} for path in (output, archive)],
     }
-    require(source_before == source_hashes() and signing_before == signing_configuration_hash(),
-            "Sources or signing configuration changed during packaging.")
+    require(source_before == source_hashes(), "Sources changed during packaging.")
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     sums_path.write_text("".join(f"{sha256(path)}  {path.name}\n" for path in (output, archive, manifest_path)))
     report["status"] = "passed"
@@ -252,13 +234,11 @@ finally:
     source_after = source_hashes()
     changed = sorted(path for path in set(source_before) | set(source_after)
                      if source_before.get(path) != source_after.get(path))
-    signing_stable = signing_before == signing_configuration_hash()
     report["sourceChangedDuringCheck"] = changed
     report["sourceStableForAcceptance"] = not changed
-    report["privateSigningConfigurationStable"] = signing_stable
-    if changed or not signing_stable:
+    if changed:
         report["status"] = "failed"
-        report["error"] = "Source or local signing configuration changed during packaging; this package is not accepted."
+        report["error"] = "Sources changed during packaging; this package is not accepted."
         exit_code = 1
     evidence.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print("Evidence:", evidence.relative_to(ROOT), flush=True)

@@ -34,13 +34,13 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: false
-      - name: Validate the existing tag before accessing signing secrets
+      - name: Validate the existing version tag
         id: tag
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: python3 scripts/release.py validate --tag "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
-  sign:
+  build:
     needs: validate
     runs-on: macos-15
     timeout-minutes: 45
@@ -51,28 +51,17 @@ jobs:
           ref: ${{ needs.validate.outputs.commit }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Test the validated release commit before accessing signing secrets
+      - name: Test the validated release commit
         run: python3 scripts/check.py unit
-      - name: Build and verify signed desktop assets
+      - name: Build and verify certificate-free Mac assets
         env:
-          RELEASE_SIGNING_DIR: ${{ runner.temp }}/lets-do-signing-${{ github.run_id }}-${{ github.run_attempt }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
-          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          MACOS_TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
-          M0_BUNDLE_PREFIX: ${{ vars.MACOS_BUNDLE_PREFIX || 'com.panion.todo.m0' }}
-          CODE_SIGN_IDENTITY: ${{ vars.MACOS_CODE_SIGN_IDENTITY || 'Apple Development' }}
         run: python3 scripts/release.py package --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --asset-dir dist
-      - name: Remove temporary signing material
-        if: always()
-        env:
-          RELEASE_SIGNING_DIR: ${{ runner.temp }}/lets-do-signing-${{ github.run_id }}-${{ github.run_attempt }}
-        run: python3 scripts/release.py cleanup
       - name: Retain only verified release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: desktop-release-assets
+          name: mac-release-assets
           path: |
             dist/*.dmg
             dist/*.zip
@@ -82,7 +71,7 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: [validate, sign]
+    needs: [validate, build]
     runs-on: macos-15
     timeout-minutes: 15
     permissions:
@@ -94,10 +83,10 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: false
-      - name: Download verified desktop assets
+      - name: Download verified Mac assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: desktop-release-assets
+          name: mac-release-assets
           path: dist
       - name: Upload all assets to a draft, verify, then publish the preview
         env:

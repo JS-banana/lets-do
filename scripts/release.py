@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
-"""Validate a release tag, sign with explicitly supplied secrets, or publish verified assets."""
+"""Validate a release tag, build certificate-free Mac assets, or publish verified assets."""
 import argparse
-import base64
 import datetime
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import secrets
-import shlex
-import shutil
 import subprocess
 import sys
-import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +20,6 @@ for name in ("validate", "package", "publish"):
     command.add_argument("--commit", help="Require this immutable commit, as resolved by the validation job.")
     if name != "validate":
         command.add_argument("--asset-dir", type=Path, default=Path("dist"))
-commands.add_parser("cleanup", help="Remove only this job's owned temporary signing files and keychain.")
 args = parser.parse_args()
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 logs = ROOT / ".build" / "release" / stamp
@@ -38,14 +32,13 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
-def run(name, command, *, env=None, allowed_failure=False):
+def run(name, command, *, allowed_failure=False):
     global log_index
     log_index += 1
     log = logs / f"{log_index:02d}-{name}.log"
-    # Some tools print certificate subjects or repeat password-bearing arguments on failure.
-    # Never echo their output, command line, or CalledProcessError into the Actions log.
+    # Keep raw tool output in local logs, outside the release asset allowlist.
     try:
-        result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
+        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
     except OSError:
         raise RuntimeError(f"{name} could not start; required runner tools are missing.") from None
     log.write_text(result.stdout + "\n--- stderr ---\n" + result.stderr)
@@ -70,76 +63,12 @@ def validate_tag(tag, expected=None):
     return commit
 
 
-def signing_directory():
-    value = os.environ.get("RELEASE_SIGNING_DIR")
-    return Path(value).resolve() if value else None
-
-
-def cleanup(path):
-    if not path or not path.exists():
-        return
-    require((path / ".lets-do-signing").is_file(), "Refusing to clean an unowned signing directory.")
-    original = path / "search-list.json"
-    restored = True
-    if original.exists():
-        restored = run("restore-keychains", ["security", "list-keychains", "-d", "user", "-s"] +
-                       json.loads(original.read_text()), allowed_failure=True).returncode == 0
-    keychain = path / "release.keychain-db"
-    deleted = True
-    if keychain.exists():
-        deleted = run("delete-keychain", ["security", "delete-keychain", str(keychain)], allowed_failure=True).returncode == 0
-    (path / "certificate.p12").unlink(missing_ok=True)
-    # Keep ownership and recovery metadata if a keychain operation failed so always() can retry.
-    if restored and deleted:
-        shutil.rmtree(path)
-    require(restored and deleted, "Temporary signing cleanup failed; the always() step will retry.")
-
-
-def package(tag, commit, asset_dir):
-    required = ("MACOS_CERTIFICATE_P12_BASE64", "MACOS_CERTIFICATE_PASSWORD", "MACOS_TEAM_ID")
-    missing = [name for name in required if not os.environ.get(name)]
-    require(not missing, "Release signing is not configured. Missing repository secrets: " + ", ".join(missing))
-    require(sys.platform == "darwin", "Signing requires a macOS runner.")
-    require(re.fullmatch(r"[A-Z0-9]{10}", os.environ["MACOS_TEAM_ID"]), "MACOS_TEAM_ID must be a ten-character team identifier.")
-    require(run("head", ["git", "rev-parse", "HEAD"]).stdout.strip() == commit, "Check out the validated tag commit before signing.")
+def package(commit, asset_dir):
+    require(sys.platform == "darwin", "Mac packaging requires a macOS runner.")
+    require(run("head", ["git", "rev-parse", "HEAD"]).stdout.strip() == commit, "Check out the validated tag commit before packaging.")
     require(not run("clean-source", ["git", "status", "--porcelain"]).stdout.strip(), "Release source must be clean.")
-    path = signing_directory()
-    if path:
-        path.mkdir(mode=0o700, parents=True, exist_ok=False)
-    else:
-        path = Path(tempfile.mkdtemp(prefix="lets-do-signing-", dir=os.environ.get("RUNNER_TEMP")))
-    path.chmod(0o700)
-    (path / ".lets-do-signing").touch(mode=0o600)
-    try:
-        original = run("keychain-search-list", ["security", "list-keychains", "-d", "user"]).stdout
-        (path / "search-list.json").write_text(json.dumps(shlex.split(original)))
-        p12 = path / "certificate.p12"
-        encoded = "".join(os.environ["MACOS_CERTIFICATE_P12_BASE64"].split())
-        certificate = base64.b64decode(encoded, validate=True)
-        require(certificate, "The signing certificate secret is empty.")
-        with p12.open("xb") as stream:
-            os.chmod(p12, 0o600)
-            stream.write(certificate)
-        keychain, password = path / "release.keychain-db", secrets.token_urlsafe(40)
-        run("create-keychain", ["security", "create-keychain", "-p", password, str(keychain)])
-        run("keychain-settings", ["security", "set-keychain-settings", "-lut", "21600", str(keychain)])
-        run("unlock-keychain", ["security", "unlock-keychain", "-p", password, str(keychain)])
-        run("import-certificate", ["security", "import", str(p12), "-k", str(keychain), "-P",
-                                   os.environ["MACOS_CERTIFICATE_PASSWORD"], "-t", "cert", "-f", "pkcs12",
-                                   "-T", "/usr/bin/codesign", "-T", "/usr/bin/security"])
-        run("key-partitions", ["security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", password, str(keychain)])
-        run("select-keychain", ["security", "list-keychains", "-d", "user", "-s", str(keychain)])
-        identities = run("signing-identities", ["security", "find-identity", "-v", "-p", "codesigning", str(keychain)]).stdout
-        require(re.search(r"\b1 valid identities found\b", identities), "Supply exactly one valid code-signing identity in the P12.")
-        env = os.environ.copy()
-        env["DEVELOPMENT_TEAM"] = os.environ["MACOS_TEAM_ID"]
-        # The compiler does not need the P12 or its password in its environment.
-        for key in required:
-            env.pop(key, None)
-        run("package-mac", [sys.executable, "scripts/package-mac.py", "--output-dir", str(asset_dir.resolve())], env=env)
-    finally:
-        cleanup(path)
-    print("Signed DMG, ZIP, checksums and public manifest are ready. Raw signing logs are not upload assets.")
+    run("package-mac", [sys.executable, "scripts/package-mac.py", "--output-dir", str(asset_dir.resolve())])
+    print("Certificate-free Mac DMG, ZIP, checksums and public manifest are ready.")
 
 
 def publish(tag, commit, asset_dir):
@@ -153,9 +82,14 @@ def publish(tag, commit, asset_dir):
     require(all(path.is_file() and not path.is_symlink() and path.stat().st_size > 0 for path in assets), "An asset is missing, empty or a symlink.")
     manifest = json.loads((asset_dir / "release-manifest.json").read_text())
     require(manifest.get("sourceCommit") == commit and manifest.get("version") == tag[1:] and
-            manifest.get("sourceIsClean") is True and manifest.get("configuration") == "DesktopLocal" and
-            manifest.get("notarized") is False and manifest.get("widgetIncluded") is True, "The release manifest does not match the validated source and desktop configuration.")
-    require(manifest.get("signatureType") in ("Apple Development", "Developer ID Application"), "The release manifest has no supported signing certificate type.")
+            manifest.get("sourceIsClean") is True and manifest.get("configuration") == "Local" and
+            manifest.get("notarized") is False and manifest.get("widgetIncluded") is False and
+            manifest.get("cloudEnabled") is False and manifest.get("signatureType") == "ad-hoc",
+            "The release manifest does not match the validated source and certificate-free Local configuration.")
+    require(manifest.get("architectures") == {"app": ["arm64", "x86_64"]} and
+            manifest.get("verification") == {"strictDeepSignature": True, "certificateAbsent": True,
+                "sharedGroupEntitlementsAbsent": True, "getTaskAllowAbsent": True, "debugDylibsAbsent": True,
+                "widgetAbsent": True, "dmgVerified": True}, "The Local package verification is incomplete.")
     hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in assets}
     expected_sums = "".join(f"{hashes[name]}  {name}\n" for name in names[:3])
     require((asset_dir / "SHA256SUMS").read_text() == expected_sums, "Release checksums do not match the assets.")
@@ -164,10 +98,11 @@ def publish(tag, commit, asset_dir):
     existing = run("existing-release", ["gh", "api", f"{endpoint}/tags/{tag}"], allowed_failure=True)
     require(existing.returncode != 0, "A release already exists; refusing to replace it.")
     notes = logs / "release-notes.md"
-    notes.write_text(f"DesktopLocal preview for macOS 14 or later (Intel and Apple silicon).\n\n"
+    notes.write_text(f"Local Mac app preview for macOS 14 or later (Intel and Apple silicon).\n\n"
                      f"Download the DMG, open it, and drag Let's Do into Applications. The ZIP contains the same app.\n\n"
-                     f"Signature: {manifest['signatureType']}. This preview is not notarized; macOS may require explicit approval. "
-                     f"System Widget behavior on another Mac still requires testing. iCloud is not enabled.\n\n"
+                     f"This certificate-free preview has an ad hoc integrity signature and is not notarized. "
+                     f"macOS may require approval under System Settings → Privacy & Security after the first attempt to open it. "
+                     f"This download contains the local main app; system Widgets and iCloud are not included.\n\n"
                      f"Source commit: `{commit}`. Verify downloads with `SHA256SUMS`.\n")
     release_id = None
     published = False
@@ -197,22 +132,18 @@ def publish(tag, commit, asset_dir):
 
 
 try:
-    if args.command == "cleanup":
-        cleanup(signing_directory())
+    resolved = validate_tag(args.tag, args.commit)
+    if args.command == "validate":
+        print("tag=" + args.tag)
+        print("commit=" + resolved)
+    elif args.command == "package":
+        package(resolved, args.asset_dir)
     else:
-        resolved = validate_tag(args.tag, args.commit)
-        if args.command == "validate":
-            print("tag=" + args.tag)
-            print("commit=" + resolved)
-        elif args.command == "package":
-            package(args.tag, resolved, args.asset_dir)
-        else:
-            publish(args.tag, resolved, args.asset_dir)
+        publish(args.tag, resolved, args.asset_dir)
 except RuntimeError as error:
-    # RuntimeError messages above are deliberately authored without command output or secret values.
+    # RuntimeError messages above are deliberately authored without raw command output.
     print("Release step failed: " + str(error), file=sys.stderr)
     sys.exit(1)
 except (Exception, KeyboardInterrupt):
-    # Avoid printing values from subprocess, base64, JSON or certificate errors.
-    print("Release step failed. Check the tag/version/main ancestry, signing secret configuration, and local .build/release logs. No raw signing output is uploaded.", file=sys.stderr)
+    print("Release step failed. Check the tag/version/main ancestry and local .build/release logs. Raw logs are not release assets.", file=sys.stderr)
     sys.exit(1)
