@@ -3,6 +3,85 @@ import XCTest
 @testable import TodoM0
 
 final class StoreSessionTests: XCTestCase {
+    func testDistributionHostAndWidgetResolveOneIsolatedLibraryRoot() throws {
+        let home = URL(fileURLWithPath: "/isolated-home/example", isDirectory: true)
+        let appID = "com.example.probe.mac"
+        let widgetID = appID + ".widget"
+        let widgetSupport = home.appendingPathComponent("Library/Containers/\(widgetID)/Data/Library/Application Support", isDirectory: true)
+        let host = try StoreSession.distributionBaseURL(
+            bundleIdentifier: appID, appIdentifier: appID, widgetIdentifier: widgetID,
+            applicationSupport: home.appendingPathComponent("Library/Application Support", isDirectory: true), userHome: home)
+        let widget = try StoreSession.distributionBaseURL(
+            bundleIdentifier: widgetID, appIdentifier: appID, widgetIdentifier: widgetID,
+            applicationSupport: widgetSupport, userHome: widgetSupport.deletingLastPathComponent().deletingLastPathComponent())
+
+        XCTAssertEqual(host, widget)
+        XCTAssertEqual(host, widgetSupport.appendingPathComponent("TodoM0/MacDistribution", isDirectory: true))
+        XCTAssertFalse(host.path.contains("Group Containers"))
+    }
+
+    func testDistributionStorageRejectsUnrelatedOrMalformedIdentities() {
+        let home = URL(fileURLWithPath: "/isolated-home/example", isDirectory: true)
+        let appID = "com.example.probe.mac"
+        for (bundle, app, widget) in [
+            (nil, appID, appID + ".widget"),
+            ("com.other.app", appID, appID + ".widget"),
+            (appID, nil, appID + ".widget"),
+            (appID, appID, nil),
+            (appID, appID, appID),
+            (appID, appID, "com.other.widget"),
+            ("../app", "../app", "../app.widget"),
+            ("com..app", "com..app", "com..app.widget"),
+            (appID + "\n", appID + "\n", appID + "\n.widget"),
+            ("$(M0_APP_ID)", "$(M0_APP_ID)", "$(M0_APP_ID).widget")
+        ] as [(String?, String?, String?)] {
+            XCTAssertThrowsError(try StoreSession.distributionBaseURL(
+                bundleIdentifier: bundle, appIdentifier: app, widgetIdentifier: widget,
+                applicationSupport: home, userHome: home))
+        }
+    }
+
+    func testDistributionRunNameRejectsAmbiguousArgumentsAndKeepsColdLaunchSelection() throws {
+        XCTAssertNil(try StoreSession.distributionRunName(arguments: ["app"]))
+        for valid in ["a", "capture-01", String(repeating: "a", count: 70)] {
+            XCTAssertEqual(try StoreSession.distributionRunName(arguments: ["app", "-M0Run", valid]), valid)
+        }
+        for invalid in [
+            ["app", "-M0Run"], ["app", "-M0Run", ""], ["app", "-M0Run", "../manual"],
+            ["app", "-M0Run", "-NSDocumentRevisionsDebugMode", "YES"],
+            ["app", "-M0Run", String(repeating: "a", count: 71)],
+            ["app", "-M0Run", "one", "-M0Run", "one"],
+            ["app", "-M0Run", "one", "-M0Run", "two"], ["app", "-M0Run=one"],
+            ["app", "-M0Run", "one\n"], ["app", "-M0Run", "manual"],
+            ["app", "-M0Run", "MANUAL"], ["app", "-M0Run", "mAnUaL"]
+        ] {
+            XCTAssertThrowsError(try StoreSession.distributionRunName(arguments: invalid))
+        }
+        let previous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-capture-01",
+                                    accountHash: nil, cloudEnabled: false, ready: true)
+        XCTAssertEqual(try StoreSession.desktopNamespace(run: StoreSession.distributionRunName(arguments: ["app"]), previous: previous), previous.namespace)
+    }
+
+    func testDistributionLegacyMappingNeverSelectsManualForAnExplicitRun() throws {
+        let support = URL(fileURLWithPath: "/isolated-home/Library/Application Support", isDirectory: true)
+        let isolated = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-capture-01",
+                                    accountHash: nil, cloudEnabled: false, ready: true)
+        let manual = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-manual",
+                                  accountHash: nil, cloudEnabled: false, ready: true)
+        XCTAssertEqual(try isolated.legacyLocalDirectory(applicationSupport: support, arguments: ["app", "-M0Run", "capture-01"]),
+                       support.appendingPathComponent("TodoM0/Local/local-capture-01", isDirectory: true))
+        XCTAssertEqual(try isolated.legacyLocalDirectory(applicationSupport: support, arguments: ["app"]).lastPathComponent, "local-capture-01")
+        XCTAssertEqual(try manual.legacyLocalDirectory(applicationSupport: support, arguments: ["app"]).lastPathComponent, "local-manual")
+        XCTAssertThrowsError(try manual.legacyLocalDirectory(applicationSupport: support, arguments: ["app", "-M0Run", "capture-01"]))
+        XCTAssertThrowsError(try isolated.legacyLocalDirectory(applicationSupport: support, arguments: ["app", "-M0Run"]))
+        for reserved in ["manual", "MANUAL", "mAnUaL"] {
+            XCTAssertThrowsError(try manual.legacyLocalDirectory(applicationSupport: support, arguments: ["app", "-M0Run", reserved]))
+        }
+        let ambiguous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-MANUAL",
+                                     accountHash: nil, cloudEnabled: false, ready: true)
+        XCTAssertThrowsError(try ambiguous.legacyLocalDirectory(applicationSupport: support, arguments: ["app"]))
+    }
+
     func testCloudModesKeepTheLocalInboxSeparateFromEachAccount() throws {
         let firstHash = String(repeating: "a", count: 64)
         let secondHash = String(repeating: "b", count: 64)

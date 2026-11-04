@@ -4,6 +4,10 @@ import Darwin
 import Foundation
 import OSLog
 
+#if M0_DISTRIBUTION && (M0_LOCAL || M0_DESKTOP || M0_CLOUD)
+#error("MacDistribution must not combine with another storage mode.")
+#endif
+
 // The same advisory lock protocol is used by both executables. A model lease
 // lasts as long as an open container; session leases cover each local operation.
 final class StoreFileLock {
@@ -69,7 +73,16 @@ struct StoreSession: Codable, Equatable, Sendable {
     }
 
     static var isDesktopLocalBuild: Bool {
-        #if os(macOS) && M0_DESKTOP
+        // Both desktop configurations use published local sessions; only DesktopLocal uses an App Group.
+        #if os(macOS) && (M0_DESKTOP || M0_DISTRIBUTION)
+        true
+        #else
+        false
+        #endif
+    }
+
+    static var isMacDistributionBuild: Bool {
+        #if os(macOS) && M0_DISTRIBUTION
         true
         #else
         false
@@ -79,6 +92,19 @@ struct StoreSession: Codable, Equatable, Sendable {
     static var supportsCloudSync: Bool { !isLocalBuild && !isDesktopLocalBuild }
 
     static func baseURL() throws -> URL {
+        #if os(macOS)
+        if isMacDistributionBuild {
+            let fm = FileManager.default
+            return try distributionBaseURL(
+                bundleIdentifier: Bundle.main.bundleIdentifier,
+                appIdentifier: Bundle.main.object(forInfoDictionaryKey: "M0DistributionAppIdentifier") as? String,
+                widgetIdentifier: Bundle.main.object(forInfoDictionaryKey: "M0DistributionWidgetIdentifier") as? String,
+                applicationSupport: fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                           appropriateFor: nil, create: false),
+                userHome: fm.homeDirectoryForCurrentUser
+            )
+        }
+        #endif
         if isLocalBuild {
             let base = try FileManager.default.url(for: .applicationSupportDirectory,
                                                   in: .userDomainMask, appropriateFor: nil, create: true)
@@ -89,6 +115,29 @@ struct StoreSession: Codable, Equatable, Sendable {
             throw PrototypeError.unavailable("M0 App Group 不可用，请检查签名与权限。没有另建替代库。")
         }
         return group.appendingPathComponent(isDesktopLocalBuild ? "TodoM0/DesktopLocal" : "TodoM0/Development", isDirectory: true)
+    }
+
+    // Resolves one candidate location, without creating a container or claiming OS access to it.
+    static func distributionBaseURL(bundleIdentifier: String?, appIdentifier: String?, widgetIdentifier: String?,
+                                    applicationSupport: URL, userHome: URL) throws -> URL {
+        guard let appIdentifier, let widgetIdentifier,
+              appIdentifier.range(of: "^[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+\\z", options: .regularExpression) != nil,
+              widgetIdentifier == appIdentifier + ".widget",
+              applicationSupport.isFileURL, userHome.isFileURL else {
+            throw PrototypeError.invalid("本机分发版的应用与小组件身份配置不匹配；没有选择其他任务库。")
+        }
+        let support: URL
+        switch bundleIdentifier {
+        case widgetIdentifier:
+            support = applicationSupport
+        case appIdentifier:
+            support = userHome.appendingPathComponent("Library/Containers", isDirectory: true)
+                .appendingPathComponent(widgetIdentifier, isDirectory: true)
+                .appendingPathComponent("Data/Library/Application Support", isDirectory: true)
+        default:
+            throw PrototypeError.invalid("无法确认本机分发版的进程身份；没有选择其他任务库。")
+        }
+        return support.appendingPathComponent("TodoM0/MacDistribution", isDirectory: true)
     }
 
     func directory() throws -> URL {
@@ -109,6 +158,34 @@ struct StoreSession: Codable, Equatable, Sendable {
         let args = ProcessInfo.processInfo.arguments
         let run = args.firstIndex(of: "-M0Run").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
         return run?.range(of: "^[a-zA-Z0-9-]{1,70}$", options: .regularExpression) != nil ? run : nil
+    }
+
+    static func distributionRunName(arguments: [String]) throws -> String? {
+        let markers = arguments.indices.dropFirst().filter { arguments[$0].hasPrefix("-M0Run") }
+        guard let index = markers.first else { return nil }
+        guard markers.count == 1, arguments[index] == "-M0Run", index + 1 < arguments.count,
+              arguments[index + 1].range(of: "^[A-Za-z0-9][A-Za-z0-9-]{0,69}\\z", options: .regularExpression) != nil,
+              arguments[index + 1].lowercased() != "manual" else {
+            throw PrototypeError.invalid("-M0Run 需要一个以字母或数字开头、最多 70 个字母数字或连字符的独立名称，不能使用保留名称 manual；没有使用默认任务库。")
+        }
+        return arguments[index + 1]
+    }
+
+    // A distribution launch may inspect only the legacy library with the same
+    // verified run name. An explicit automation run must never inspect manual.
+    func legacyLocalDirectory(applicationSupport: URL, arguments: [String]) throws -> URL {
+        let run = try Self.distributionRunName(arguments: arguments)
+        guard modelVersion == Self.modelVersion, accountHash == nil, !cloudEnabled,
+              namespace.range(of: "^desktop-[A-Za-z0-9][A-Za-z0-9-]{0,69}\\z", options: .regularExpression) != nil,
+              run == nil || namespace == "desktop-\(run!)", applicationSupport.isFileURL else {
+            throw PrototypeError.invalid("无法确认旧版本任务库的对应名称；没有读取其他任务库。")
+        }
+        let name = String(namespace.dropFirst("desktop-".count))
+        guard name.lowercased() != "manual" || name == "manual" else {
+            throw PrototypeError.invalid("旧版本任务库名称与手工库冲突；没有读取手工任务库。")
+        }
+        return applicationSupport.appendingPathComponent("TodoM0/Local", isDirectory: true)
+            .appendingPathComponent("local-" + name, isDirectory: true)
     }
 
     static func confirmedAccount() async throws -> String? {
@@ -192,10 +269,11 @@ struct StoreSession: Codable, Equatable, Sendable {
     static func blockExtensions() throws -> StoreSession {
         var namespace = "blocked"
         if isDesktopLocalBuild {
+            let run = isMacDistributionBuild ? try distributionRunName(arguments: ProcessInfo.processInfo.arguments) : requestedRunName
             let base = try baseURL()
             let previous = FileManager.default.fileExists(atPath: base.appendingPathComponent("session.json").path)
                 ? try readPublished(at: base) : nil
-            namespace = try desktopNamespace(run: requestedRunName, previous: previous)
+            namespace = try desktopNamespace(run: run, previous: previous)
         }
         let blocked = StoreSession(modelVersion: modelVersion, namespace: namespace, accountHash: nil,
                                    cloudEnabled: false, ready: false)
