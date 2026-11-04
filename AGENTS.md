@@ -1,26 +1,24 @@
 # AGENTS.md
 
-## 协作
+## 协作与入口
 
-- 默认中文交流；修改前核对当前差异，保留其他协作者的改动。
-- README 面向应用使用者，工程细节放到 [开发说明](docs/DEVELOPMENT.md)，签名与发版放到 [发布说明](docs/RELEASING.md)。
-- 按实际代码、工程配置与运行证据描述功能。构建、XCTest、原生 GUI、系统 Widget 与跨设备同步分别验证，不能相互替代。
-- 本地 shell 遵循使用者环境中已有的工具约定；GitHub Actions 直接使用 runner 自带工具。
+- 默认中文交流；先检查当前差异与直接相关流程，保留其他协作者改动。同一时间只有一个编码子代理；只读审查可并行。
+- 文档按最终用途整体整理：关键事实、约束、证据边界与下一步集中维护，入口只保留摘要和引用，不追加流水或重复补丁。
+- [README](README.md) 面向使用者；环境、配置、源码与检查命令见[开发说明](docs/DEVELOPMENT.md)；候选构建和公开发行见[发布说明](docs/RELEASING.md)；Mac 存储、旧库升级与系统验收规则见 [Mac 分发说明](docs/MAC-DISTRIBUTION.md)。
+- 本地 shell 遵循使用者环境中已有的工具约定；GitHub Actions 使用 runner 自带工具。不提交本机签名配置、凭据、个人路径、设备标识、数据库或原始私有日志。
 
-## 验证
+## 修改与验证
 
-- 项目原生框架实现，无第三方包依赖；入口为 `Todo.xcodeproj`。
-- `python3 scripts/check.py unit`：Mac XCTest。
-- `python3 scripts/check.py build`：Local Mac、iPhone 模拟器／设备编译。
-- `python3 scripts/check.py cloud-build`：CloudDevelopment 无签名编译，不代表云能力已可使用。
-- `python3 scripts/check.py desktop-compile`：DesktopLocal App 与 Widget 无签名编译。
-- `python3 scripts/package-mac.py`：构建、校验并打包无证书的 Mac Local 主应用。
-- 日志与报告保存在被忽略的 `.build/`；不提交本机配置、凭据、数据库、原始设备标识或个人内容。
+- 工程入口为 `Todo.xcodeproj`，使用原生框架，无第三方包依赖。修改日期、存储、Intent 时检查 Shared 的共同规则及调用方，按[检查与构建](docs/DEVELOPMENT.md#检查与构建)运行对应验证。
+- Local、MacDistribution、DesktopLocal 与 CloudDevelopment 的用途、路径和权限保持区分；公开 Mac 包使用 MacDistribution，不能用 Local 编译代替分发配置验证。
+- 自动运行使用新的隔离 `-M0Run` 名称，禁止使用手工库及 `manual` 的大小写变体。无效分发参数必须安全拒绝，不能落入默认库。
+- 构建、XCTest、签名校验、原生 GUI、系统 Widget、iPhone 与云同步分别留证；不把刷新请求、同进程测试或编译通过记作系统运行通过。
+- 报告和日志保存在被忽略的 `.build/`；检查期间源码变化时不能作为稳定版本验收。最终运行验收绑定同一候选资产与散列，公开时不得重建、重签或重传替代资产。
 
-## 数据与系统接入
+## 数据与系统边界
 
-- Local、DesktopLocal 与 CloudDevelopment 的库互相隔离。自动运行使用独立 `-M0Run <字母数字或连字符>`，不要复用手工任务空间。
-- 写入复用 `Shared/TaskStore.swift`；修改日期、存储、Intent 时检查共同规则与调用方。
-- 主应用负责建库、迁移和云镜像；扩展只打开已核验的共享库，不建库、不迁移、不持有云镜像。
-- 正文版本保持不可变，删除使用 tombstone；保留草稿及错误恢复能力。账户或模型检查失败时阻断危险写入，不删库重建或跨账户搬库。
-- 不通过伪造 Team ID、移除权限验证或关闭系统保护来获得 Widget 共享能力。公开下载版使用 Local 主应用与 ad hoc 完整性签名，不包含系统 Widget；不要把它与有团队共享权限的 DesktopLocal 混为一谈。
+- 任务读写复用 `Shared/TaskStore.swift`；路径、角色及会话选择集中于 `Shared/StoreSession.swift`，旧 Local 升级集中于 `Shared/LocalLibraryUpgrade.swift`。不另建可写快照或多位置任务库。
+- 主应用负责建库与迁移，仅云配置持有 CloudKit 镜像；Widget／Intent 只打开已核验的现有库，不建库、不迁移。保留会话、模型租约与写锁。
+- 正文保留不可变版本及父关系，删除使用 tombstone；账户、模型、授权或启动检查失败时保留原库与草稿，不删库重建、不跨账户搬库、不静默回落空库。
+- 旧库升级保留完整数据与草稿，原子交换是提交点；交换后不以备份覆盖新库写入。不要用不含物理记录身份和草稿的任务 JSON 恢复代替完整升级。
+- MacDistribution 保留 Widget 沙盒，不使用 Apple 团队或 App Group。不得通过伪造 Team ID、移除权限验证、关闭系统保护或全局系统登记重置来获得共享或掩盖问题。

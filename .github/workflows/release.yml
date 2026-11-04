@@ -6,8 +6,15 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag on main, such as v0.1.1
+        description: Existing version tag on main, such as v0.2.0
         required: true
+        type: string
+      publish_existing_draft:
+        description: Publish the existing runtime-verified candidate without rebuilding
+        type: boolean
+        default: false
+      manifest_sha256:
+        description: SHA256 of the candidate manifest used for runtime acceptance (required for publication)
         type: string
 
 permissions:
@@ -42,6 +49,7 @@ jobs:
 
   build:
     needs: validate
+    if: github.event_name != 'workflow_dispatch' || !inputs.publish_existing_draft
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -70,7 +78,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  publish:
+  prepare:
     needs: [validate, build]
     runs-on: macos-15
     timeout-minutes: 15
@@ -88,10 +96,33 @@ jobs:
         with:
           name: mac-release-assets
           path: dist
-      - name: Upload all assets to a draft, verify, then publish the preview
+      - name: Upload and verify a candidate draft
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: python3 scripts/release.py publish --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --asset-dir dist
+        run: python3 scripts/release.py prepare --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --asset-dir dist
+
+  publish:
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_existing_draft
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify and publish the accepted candidate
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+          CANDIDATE_MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/release.py publish --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --manifest-sha256 "$CANDIDATE_MANIFEST_SHA256"

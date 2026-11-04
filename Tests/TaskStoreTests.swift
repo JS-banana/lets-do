@@ -903,6 +903,183 @@ final class TaskStoreTests: XCTestCase {
         }
     }
 
+    #if os(macOS)
+    @MainActor
+    func testLocalUpgradePreservesPhysicalRecordsRevisionsDraftsHistoryAndIsIdempotent() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Upgrade-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let original = try TaskStore(directory: source)
+        let id = UUID(), parent = UUID(), child = UUID()
+        try original.createTask(id: id, title: "完整升级")
+        try original.saveNoteRevision(taskID: id, id: parent, body: "父版本", parentIDs: [])
+        let format = NoteFormatting(bold: [.init(location: 0, length: 3)])
+        try original.saveNoteRevision(taskID: id, id: child, body: "子版本", parentIDs: [parent], formatting: format)
+        try original.setCompleted(id: id, completed: true)
+        try original.moveToTrash(id: id)
+        let capture = LocalDraft(formatVersion: 1, id: UUID(), taskID: UUID(), kind: .capture,
+                                 title: "收集草稿", body: "尚未创建任务", parentIDs: [], updatedAt: Date())
+        let editor = LocalDraft(formatVersion: 1, id: UUID(), taskID: id, kind: .editor,
+                                title: "编辑草稿", body: "保留输入", parentIDs: [child], updatedAt: Date())
+        try original.saveDraft(capture); try original.saveDraft(editor)
+        try original.consumeHistory()
+        let snapshots = try original.snapshots(), drafts = try original.drafts()
+        let recordKey = try XCTUnwrap(original.container?.viewContext.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskItem")).first?.value(forKey: "recordKey") as? String)
+        let history = NSPersistentHistoryChangeRequest.fetchHistory(after: nil as NSPersistentHistoryToken?)
+        let originalTransactions = try XCTUnwrap(original.container?.viewContext.execute(history) as? NSPersistentHistoryResult).result as? [NSPersistentHistoryTransaction]
+        XCTAssertFalse(try XCTUnwrap(originalTransactions).isEmpty)
+        try original.close()
+
+        try LocalLibraryUpgrade.prepare(source: source, target: target)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: source.path), target.path)
+        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".desktop-isolated.upgrade.json")
+        let receipt = try JSONDecoder().decode(LocalLibraryUpgrade.Receipt.self, from: Data(contentsOf: receiptURL))
+        let backup = source.deletingLastPathComponent().appendingPathComponent(receipt.backupName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: backup.appendingPathComponent("history-app.token").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.appendingPathComponent("history-app.token").path))
+        let upgraded = try TaskStore(directory: target)
+        XCTAssertEqual(try upgraded.snapshots(), snapshots)
+        XCTAssertEqual(try upgraded.drafts(), drafts)
+        XCTAssertEqual(try upgraded.container?.viewContext.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskItem")).first?.value(forKey: "recordKey") as? String, recordKey)
+        let copiedTransactions = try XCTUnwrap(upgraded.container?.viewContext.execute(history) as? NSPersistentHistoryResult).result as? [NSPersistentHistoryTransaction]
+        XCTAssertEqual(copiedTransactions?.count, originalTransactions?.count)
+        try upgraded.close()
+        try LocalLibraryUpgrade.prepare(source: source, target: target)
+        XCTAssertEqual(try JSONDecoder().decode(LocalLibraryUpgrade.Receipt.self, from: Data(contentsOf: receiptURL)), receipt)
+    }
+
+    @MainActor
+    func testLocalUpgradeRejectsOpenSourceAndWriterContentionWithoutChangingData() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeLocks-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let original = try TaskStore(directory: source)
+        let id = UUID()
+        try original.createTask(id: id, title: "旧应用仍打开")
+        XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
+        XCTAssertEqual(try original.snapshots().map(\.id), [id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        try original.close()
+        do {
+            let writer = try StoreFileLock(url: source.appendingPathComponent("write.lock"), mode: LOCK_EX)
+            defer { withExtendedLifetime(writer) {} }
+            XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
+        }
+        let reopened = try TaskStore(directory: source)
+        XCTAssertEqual(try reopened.snapshots().map(\.id), [id])
+        try reopened.close()
+    }
+
+    @MainActor
+    func testLocalUpgradeRecoversPreparedAndCommittedDiskStatesWithoutOverwritingNewWrites() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeRecovery-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let original = try TaskStore(directory: source), first = UUID(), afterPrepared = UUID(), afterCommit = UUID()
+        try original.createTask(id: first, title: "原始任务")
+        try original.close()
+        try LocalLibraryUpgrade.prepare(source: source, target: target)
+        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".desktop-isolated.upgrade.json")
+        let receipt = try JSONDecoder().decode(LocalLibraryUpgrade.Receipt.self, from: Data(contentsOf: receiptURL))
+        let backup = source.deletingLastPathComponent().appendingPathComponent(receipt.backupName)
+        // Reconstruct the on-disk state immediately before the atomic exchange.
+        XCTAssertEqual(renameatx_np(AT_FDCWD, source.path, AT_FDCWD, backup.path, UInt32(RENAME_SWAP)), 0)
+        let oldApp = try TaskStore(directory: source)
+        try oldApp.createTask(id: afterPrepared, title: "准备后旧应用又写入")
+        try oldApp.close()
+        try LocalLibraryUpgrade.prepare(source: source, target: target)
+        let newApp = try TaskStore(directory: target)
+        XCTAssertEqual(Set(try newApp.snapshots().map(\.id)), Set([first, afterPrepared]))
+        try newApp.createTask(id: afterCommit, title: "交换后新库写入")
+        try newApp.close()
+        // Receipt deliberately has no phase flag: the exact source alias is
+        // the commit fact, including a crash immediately after the swap.
+        try LocalLibraryUpgrade.prepare(source: source, target: target)
+        let recovered = try TaskStore(directory: target)
+        XCTAssertEqual(Set(try recovered.snapshots().map(\.id)), Set([first, afterPrepared, afterCommit]))
+        try recovered.close()
+        let retained = try TaskStore(directory: backup)
+        XCTAssertEqual(Set(try retained.snapshots().map(\.id)), Set([first, afterPrepared]))
+        try retained.close()
+    }
+
+    @MainActor
+    func testLocalUpgradeAliasSharesLocksAndWidgetWritesWithTarget() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeAlias-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let original = try TaskStore(directory: source), id = UUID()
+        try original.createTask(id: id, title: "同一事实源")
+        try original.close()
+        try LocalLibraryUpgrade.prepare(source: source, target: target)
+        let oldApp = try TaskStore(directory: source), widget = try TaskStore(directory: target, isExtension: true)
+        defer { try? oldApp.close(); try? widget.close() }
+        try widget.setCompleted(id: id, completed: true)
+        try oldApp.consumeHistory()
+        XCTAssertTrue(try XCTUnwrap(oldApp.snapshots().first).isCompleted)
+        do {
+            let writer = try StoreFileLock(url: target.appendingPathComponent("write.lock"), mode: LOCK_EX)
+            defer { withExtendedLifetime(writer) {} }
+            XCTAssertThrowsError(try oldApp.updateTitle(id: id, title: "被同一把锁阻断"))
+        }
+        XCTAssertThrowsError(try StoreFileLock(url: target.appendingPathComponent("model.lock"), mode: LOCK_EX))
+    }
+
+    @MainActor
+    func testLocalUpgradeRejectsTargetsInsideSourceThroughAnAncestorSymlink() throws {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent("TodoM0UpgradeAncestor-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: base) }
+        let source = base.appendingPathComponent("Local/local-a")
+        let original = try TaskStore(directory: source), id = UUID()
+        try original.createTask(id: id, title: "祖先链接不能把源变成环")
+        try original.close()
+        let sqlite = source.appendingPathComponent("tasks.sqlite")
+        let bytes = try Data(contentsOf: sqlite)
+        let alias = base.appendingPathComponent("Container")
+        try fm.createSymbolicLink(atPath: alias.path, withDestinationPath: source.path)
+        let existing = source.appendingPathComponent("Distribution", isDirectory: true)
+        try fm.createDirectory(at: existing, withIntermediateDirectories: false)
+        for target in [alias, alias.appendingPathComponent("Distribution/desktop-a"),
+                       alias.appendingPathComponent("NotCreated/desktop-a")] {
+            XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
+            XCTAssertEqual(try Data(contentsOf: sqlite), bytes)
+            XCTAssertThrowsError(try fm.destinationOfSymbolicLink(atPath: source.path))
+        }
+        XCTAssertTrue(try fm.contentsOfDirectory(atPath: existing.path).isEmpty)
+        XCTAssertFalse(fm.fileExists(atPath: source.appendingPathComponent("NotCreated").path))
+        let reopened = try TaskStore(directory: source)
+        XCTAssertEqual(try reopened.snapshots().map(\.id), [id])
+        try reopened.close()
+    }
+
+    @MainActor
+    func testLocalUpgradeRejectsUnownedTargetsUnknownAliasesAndInvalidReceipts() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeInvalid-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let original = try TaskStore(directory: source), existing = try TaskStore(directory: target)
+        let oldID = UUID(), targetID = UUID()
+        try original.createTask(id: oldID, title: "旧任务")
+        try existing.createTask(id: targetID, title: "不能覆盖的新库")
+        try original.close(); try existing.close()
+        XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
+        let retained = try TaskStore(directory: target)
+        XCTAssertEqual(try retained.snapshots().map(\.id), [targetID])
+        try retained.close()
+        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".desktop-isolated.upgrade.json")
+        try Data("not a receipt".utf8).write(to: receiptURL)
+        XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
+        let future = LocalLibraryUpgrade.Receipt(version: 2, id: UUID(), source: source.path, target: target.path, storeUUID: "future")
+        try JSONEncoder().encode(future).write(to: receiptURL)
+        XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
+        try FileManager.default.removeItem(at: receiptURL)
+        try FileManager.default.moveItem(at: source, to: source.appendingPathExtension("retained"))
+        try FileManager.default.createSymbolicLink(atPath: source.path, withDestinationPath: target.path)
+        XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
+    }
+    #endif
+
     @MainActor
     func testLocalCapturePerformanceBaseline() throws {
         try withStore { store in

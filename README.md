@@ -15,7 +15,7 @@ Let’s Do 是一款原生个人任务工具。把零散想法放进收集箱，
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/JS-banana/lets-do/releases) 下载 Mac 预览版。安装包由 GitHub Actions 构建，不需要维护者提供证书或私钥。
+从 [GitHub Releases](https://github.com/JS-banana/lets-do/releases) 下载 Mac 预览版。
 
 Mac 安装包面向 **macOS 14 及以上**，同时支持 Apple 芯片与 Intel：
 
@@ -36,20 +36,25 @@ Mac 安装包面向 **macOS 14 及以上**，同时支持 Apple 芯片与 Intel�
 
 在「设置 → 数据与诊断」中可以导出 JSON 备份。恢复仅支持空的本地库；早期版本请保留独立备份。
 
+## 桌面小组件
+
+小组件需要 **v0.2.0 或更新版本**；v0.1.1 只包含主应用。各版本的可用下载以 [Releases](https://github.com/JS-banana/lets-do/releases) 为准。
+
+1. 安装后先打开一次 Let’s Do，完成任务库初始化。
+2. 在 Mac 桌面右键，选择「编辑小组件」，搜索 Let’s Do。
+3. 添加「今天的任务」「本周计划」或「月历总览」，选择适合桌面的尺寸。
+
+点击任务旁的圆圈可标记完成；点击任务标题或日期可打开应用中的对应内容。「快速记」会打开应用的记录窗口，供你输入并保存。
+
 ## 当前范围
 
-Mac 下载版使用本机任务库，不连接 iCloud，也不包含系统桌面小组件。项目保留 iPhone、CloudKit 和 Widget 的开发源码；它们的权限配置与真实设备运行分别验证，不能把源码或编译通过当作下载版已提供这些能力。
+Mac 下载版使用本机任务库，不连接 iCloud，无需注册应用账号。iPhone 与跨设备同步的源码仍在开发验证中。
 
-无需注册应用账号。涉及开发签名、存储位置与隔离测试的说明见[开发文档](docs/DEVELOPMENT.md)；CI 和维护者发版流程见[发布文档](docs/RELEASING.md)。
+小组件与旧版本数据升级的实现和验收范围见 [Mac 分发说明](docs/MAC-DISTRIBUTION.md)。
 
 ## 开发
 
-使用支持 Swift 6 的 Xcode 打开 `Todo.xcodeproj`，选择 `TodoM0Mac` 和 `My Mac`，使用默认 `Local` 配置运行。工程使用 SwiftUI、AppKit、Core Data、WidgetKit 与 App Intents，目前没有第三方包依赖。
-
-```sh
-python3 scripts/check.py unit
-python3 scripts/check.py build
-```
+工程使用 SwiftUI、AppKit、Core Data、WidgetKit 与 App Intents，没有第三方包依赖。从源码运行与检查见[开发说明](docs/DEVELOPMENT.md)，CI 和维护者发版见[发布说明](docs/RELEASING.md)。
 
 遇到问题可[提交 Issue](https://github.com/JS-banana/lets-do/issues)，附上系统版本、应用版本、复现步骤；请勿上传个人任务库或签名凭据。
 

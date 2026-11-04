@@ -13,7 +13,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument("check", choices=["environment", "build", "unit", "cloud-build", "desktop-build", "desktop-compile"])
+parser.add_argument("check", choices=["environment", "build", "unit", "cloud-build", "desktop-build", "desktop-compile", "distribution-build"])
 args = parser.parse_args()
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 output = ROOT / ".build" / "checks" / f"{stamp}-{args.check}"
@@ -53,7 +53,9 @@ if args.check == "environment":
     sys.exit(0)
 
 base = ["xcodebuild", "-project", "Todo.xcodeproj", "-jobs", "4"]
-configuration = "DesktopLocal" if args.check in ("desktop-build", "desktop-compile") else "CloudDevelopment" if args.check == "cloud-build" else "Local"
+configuration = ("MacDistribution" if args.check == "distribution-build" else
+                 "DesktopLocal" if args.check in ("desktop-build", "desktop-compile") else
+                 "CloudDevelopment" if args.check == "cloud-build" else "Local")
 
 
 def parse_test_summary(log_path):
@@ -127,7 +129,10 @@ def collect_source_hashes():
 # Freeze the source identity before any job starts; the report retains this map.
 source_sha256 = collect_source_hashes()
 jobs = []
-if args.check in ("desktop-build", "desktop-compile"):
+if args.check == "distribution-build":
+    jobs = [("mac-distribution-build", "TodoM0Distribution", "generic/platform=macOS",
+             ["build", "CODE_SIGNING_ALLOWED=NO", "ARCHS=arm64 x86_64", "ONLY_ACTIVE_ARCH=NO"])]
+elif args.check in ("desktop-build", "desktop-compile"):
     jobs = [("mac-desktop-build", "TodoM0Desktop", "platform=macOS,arch=" + platform.machine(), ["build"])]
     if args.check == "desktop-compile":
         jobs[0][3].append("CODE_SIGNING_ALLOWED=NO")
@@ -145,7 +150,7 @@ else:
 results = []
 for name, scheme, destination, extra in jobs:
     command = base + ["-scheme", scheme, "-configuration", configuration, "-destination", destination,
-                      "-derivedDataPath", str(ROOT / ".build" / ("desktop" if args.check in ("desktop-build", "desktop-compile") else "mac" if scheme.endswith("Mac") else "iphone"))] + extra
+                      "-derivedDataPath", str(ROOT / ".build" / ("distribution" if args.check == "distribution-build" else "desktop" if args.check in ("desktop-build", "desktop-compile") else "mac" if scheme.endswith("Mac") else "iphone"))] + extra
     print("Running", name, flush=True)
     log = output / f"{name}.log"
     started = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -168,6 +173,32 @@ for name, scheme, destination, extra in jobs:
         fallback = [line.strip() for line in lines[-8:] if line.strip()]
         print("\n".join(diagnostics[-20:] or fallback), flush=True)
 
+registration_cleanup = []
+cleanup_passed = True
+if args.check != "environment":
+    derived = "distribution" if args.check == "distribution-build" else "desktop" if args.check in ("desktop-build", "desktop-compile") else "mac"
+    app = ROOT / ".build" / derived / "Build" / "Products" / configuration / "Let's Do.app"
+    widget = app / "Contents" / "PlugIns" / "TodoM0MacWidget.appex"
+    if app.is_dir():
+        register = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+        for name, command, required in [
+            ("unregister-build-app", [register, "-u", str(app)], True),
+            ("unregister-build-widget", ["pluginkit", "-r", str(widget)], False),
+        ]:
+            process = subprocess.run(command, capture_output=True, text=True)
+            log = output / f"{name}.log"
+            log.write_text(process.stdout + process.stderr)
+            registration_cleanup.append({"command": command, "exitCode": process.returncode,
+                                         "log": str(log.relative_to(ROOT)), "logSHA256": hashlib.sha256(log.read_bytes()).hexdigest()})
+            # Removing the app may already have removed its plug-in registration.
+            already_absent = process.returncode == 1 and "-10814" in process.stdout + process.stderr
+            if required and process.returncode != 0 and not already_absent:
+                cleanup_passed = False
+        cleanup_passed = cleanup_passed and widget.is_dir()
+    elif all(item["exitCode"] == 0 for item in results):
+        cleanup_passed = False
+    print("Build registration cleanup", "PASS" if cleanup_passed else "FAIL", flush=True)
+
 # A changed source invalidates this run as stable-source acceptance evidence.
 source_sha256_after = collect_source_hashes()
 source_changed = sorted(path for path in set(source_sha256) | set(source_sha256_after)
@@ -180,12 +211,13 @@ report = {"timestamp": stamp, "kind": args.check, "configuration": configuration
           "xcode": subprocess.run(["xcodebuild", "-version"], capture_output=True, text=True).stdout.strip(),
           "sourceSHA256": source_sha256, "sourceChangedDuringCheck": source_changed,
           "sourceStableForAcceptance": not source_changed, "results": results,
+          "buildRegistrationCleanup": registration_cleanup, "buildRegistrationCleanupPassed": cleanup_passed,
           "acceptanceBoundary": {
               "automatedChecks": automated_checks,
               "macGUI": "Real Mac GUI checks are recorded separately and are outside this script.",
-              "pending": ["real iPhone", "signed Widget", "CloudKit"],
+              "pending": ["real iPhone", "system Widget runtime", "CloudKit"],
               "sourceStability": "Stable-source acceptance requires sourceChangedDuringCheck to be empty."}}
 report_path = output / "report.json"
 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 print("Evidence:", report_path.relative_to(ROOT), flush=True)
-sys.exit(0 if all(item["exitCode"] == 0 for item in results) and not source_changed else 1)
+sys.exit(0 if all(item["exitCode"] == 0 for item in results) and not source_changed and cleanup_passed else 1)

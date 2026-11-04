@@ -32,6 +32,7 @@ final class PrototypeModel: ObservableObject {
     private var restartRequested = false
     private var taskToOpen: UUID?
     private var accountCheckID = UUID()
+    private var startedDistributionDirectory: URL?
 
     var selected: TaskSnapshot? { tasks.first { $0.id == selection } }
     var active: [TaskSnapshot] { tasks.filter { $0.deletedAt == nil } }
@@ -144,6 +145,23 @@ final class PrototypeModel: ObservableObject {
             }
             guard !restartRequested else { return }
             let directory = try session.directory()
+            #if os(macOS)
+            if StoreSession.isMacDistributionBuild {
+                if let startedDistributionDirectory {
+                    guard startedDistributionDirectory == directory else {
+                        throw PrototypeError.unavailable("任务空间已切换，请退出并重新打开应用后检查新任务库；没有在运行中升级其他库。")
+                    }
+                } else {
+                    // Upgrade only before a successful startup. Same-library
+                    // restarts must not rely on detach() persisting a draft.
+                    let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                              appropriateFor: nil, create: false)
+                    let source = try session.legacyLocalDirectory(applicationSupport: support,
+                                                                  arguments: ProcessInfo.processInfo.arguments)
+                    try LocalLibraryUpgrade.prepare(source: source, target: directory)
+                }
+            }
+            #endif
             let opened = try TaskStore(directory: directory, cloudID: session.cloudEnabled ? StoreSession.cloudID : nil,
                                        session: StoreSession.isLocalBuild ? nil : session)
             opened.onChange = { [weak self] in self?.reload() }
@@ -159,6 +177,9 @@ final class PrototypeModel: ObservableObject {
             storePath = directory.path
             if !StoreSession.isLocalBuild { try StoreSession.publish(session) }
             try opened.consumeHistory()
+            // reload() presents read errors without throwing. Confirm the first
+            // distribution read before remembering a successful startup.
+            if StoreSession.isMacDistributionBuild { _ = try opened.snapshots() }
             reload()
             if selection == nil, previousPath == storePath,
                let previousSelection, tasks.contains(where: { $0.id == previousSelection }) {
@@ -166,6 +187,7 @@ final class PrototypeModel: ObservableObject {
             }
             loaded = true
             capture.attach(to: opened, tasks: tasks)
+            if StoreSession.isMacDistributionBuild { startedDistributionDirectory = directory }
         } catch {
             try? store?.close()
             store = nil
