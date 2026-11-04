@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleDisplayName</key><string>Let’s Do 小组件</string>
+    <key>NSExtension</key><dict><key>NSExtensionPointIdentifier</key><string>com.apple.widgetkit-extension</string></dict>
+    <key>M0AppGroup</key><string>$(M0_APP_GROUP)</string>
+    <key>M0CloudContainer</key><string>$(M0_CLOUD_CONTAINER)</string>
+    <key>M0URLScheme</key><string>$(M0_URL_SCHEME)</string>
+    <key>M0ModelVersion</key><integer>2</integer>
+</dict></plist>

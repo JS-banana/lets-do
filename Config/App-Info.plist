@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleName</key><string>Let’s Do</string>
+    <key>CFBundleDisplayName</key><string>Let’s Do</string>
+    <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>$(M0_URL_SCHEME)</string></array></dict></array>
+    <key>M0URLScheme</key><string>$(M0_URL_SCHEME)</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+    <key>UIApplicationSupportsIndirectInputEvents</key><true/>
+    <key>UILaunchScreen</key><dict/>
+    <key>UIBackgroundModes</key><array><string>remote-notification</string></array>
+    <key>M0AppGroup</key><string>$(M0_APP_GROUP)</string>
+    <key>M0CloudContainer</key><string>$(M0_CLOUD_CONTAINER)</string>
+    <key>M0ModelVersion</key><integer>2</integer>
+</dict></plist>

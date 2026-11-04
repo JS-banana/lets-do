@@ -1,0 +1,23 @@
+.DS_Store
+.build/
+build/
+DerivedData/
+Config/Signing.local.xcconfig
+*.xcuserstate
+xcuserdata/
+*.sqlite*
+*.xcresult/
+
+# Machine-local design tools; project design rules and evidence stay versioned.
+.agents/skills/impeccable/
+.claude/skills/impeccable/
+.claude/agents/impeccable-*.md
+.impeccable/config.local.json
+
+# Signing credentials and generated distribution files stay local.
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
+dist/
+__pycache__/
