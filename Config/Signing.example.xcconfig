@@ -1,0 +1,5 @@
+// Copy to Signing.local.xcconfig and fill the registered M0 identifiers.
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+M0_BUNDLE_PREFIX = com.yourteam.todo.m0
+M0_APP_GROUP = group.com.yourteam.todo.m0
+M0_CLOUD_CONTAINER = iCloud.com.yourteam.todo.m0
