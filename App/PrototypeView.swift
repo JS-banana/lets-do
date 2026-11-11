@@ -657,7 +657,9 @@ struct PrototypeView: View {
 
     @ViewBuilder
     private func planningActions(for task: TaskSnapshot, today: Day) -> some View {
-        Button("安排到今天") { model.move(id: task.id, to: today) }
+        Button("安排到今天") {
+            model.perform { try $0.scheduleTask(id: task.id, schedule: .singleDay(today)) }
+        }
         if let monday = today.weekStart, task.schedule != .week(start: monday) {
             Button("放入本周待安排") { model.perform { try $0.scheduleTask(id: task.id, schedule: .week(start: monday)) } }
         }

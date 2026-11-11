@@ -151,4 +151,35 @@ final class CalendarPlanningTests: XCTestCase {
         XCTAssertEqual(form.schedule, .allDay(start: day, endExclusive: day.adding(days: 3)))
     }
 
+    @MainActor
+    func testExplicitTodayReplacesLegacyOvernightPlanWithoutChangingTaskOrNotes() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("TodayPlanning-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try TaskStore(directory: directory)
+        defer { try? store.close() }
+        let originalDay = try Day("2026-11-09"), today = try Day("2026-11-11")
+        let originalStart = originalDay.date(in: .gmt).addingTimeInterval(23 * 3_600)
+        let original = TaskSchedule.timed(start: originalStart, end: originalStart.addingTimeInterval(2 * 3_600),
+                                          timeZoneID: TimeZone.gmt.identifier)
+        let id = UUID()
+        try store.createTask(id: id, title: "夜间任务", schedule: original, body: "保留备注")
+        let before = try XCTUnwrap(store.snapshots().first)
+
+        // The context menu and date popover use this same explicit single-day rule.
+        try store.scheduleTask(id: id, schedule: .singleDay(today))
+        let snapshots = try store.snapshots()
+        let after = try XCTUnwrap(snapshots.first)
+        XCTAssertEqual(snapshots.map(\.id), [id])
+        XCTAssertEqual(after.revisions, before.revisions)
+        XCTAssertEqual(after.schedule, .allDay(start: today, endExclusive: today.adding(days: 1)))
+        let item = CalendarTask(id: id, title: after.title, schedule: after.schedule, isCompleted: false)
+        XCTAssertEqual(TodayTasks([item], on: today, timeZone: .gmt).scheduled.map(\.id), [id])
+        XCTAssertTrue(TodayTasks([item], on: today.adding(days: 1), timeZone: .gmt).scheduled.isEmpty)
+
+        // Dragging is a move and continues to preserve the old two-hour span.
+        let dragged = try original.moved(to: today, displayTimeZone: .gmt)
+        XCTAssertTrue(try XCTUnwrap(dragged.dayRange(in: .gmt)).contains(today.adding(days: 1)))
+        XCTAssertThrowsError(try TaskSchedule.singleDay(Day("9999-12-31")).validated())
+    }
+
 }
