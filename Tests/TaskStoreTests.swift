@@ -989,6 +989,8 @@ final class TaskStoreTests: XCTestCase {
         let editor = LocalDraft(formatVersion: 1, id: UUID(), taskID: id, kind: .editor,
                                 title: "编辑草稿", body: "保留输入", parentIDs: [child], updatedAt: Date())
         try original.saveDraft(capture); try original.saveDraft(editor)
+        let links = Data(#"{"imports":[]}"#.utf8)
+        try links.write(to: source.appendingPathComponent("reminders-links.json"))
         try original.consumeHistory()
         let snapshots = try original.snapshots(), drafts = try original.drafts()
         let recordKey = try XCTUnwrap(original.container?.viewContext.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskItem")).first?.value(forKey: "recordKey") as? String)
@@ -1007,6 +1009,7 @@ final class TaskStoreTests: XCTestCase {
         let upgraded = try TaskStore(directory: target)
         XCTAssertEqual(try upgraded.snapshots(), snapshots)
         XCTAssertEqual(try upgraded.drafts(), drafts)
+        XCTAssertEqual(try Data(contentsOf: target.appendingPathComponent("reminders-links.json")), links)
         XCTAssertEqual(try upgraded.container?.viewContext.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskItem")).first?.value(forKey: "recordKey") as? String, recordKey)
         let copiedTransactions = try XCTUnwrap(upgraded.container?.viewContext.execute(history) as? NSPersistentHistoryResult).result as? [NSPersistentHistoryTransaction]
         XCTAssertEqual(copiedTransactions?.count, originalTransactions?.count)

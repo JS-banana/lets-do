@@ -111,7 +111,7 @@ def inspect_signature(path, name, expected_entitlements=None):
     entitlements = plistlib.loads(raw[start:end + len("</plist>")].encode()) if start >= 0 else {}
     expected_entitlements = expected_entitlements or {}
     require(entitlements == expected_entitlements,
-            f"{name} has unexpected entitlements; only the Widget may claim its sandbox.")
+            f"{name} has unexpected entitlements: {entitlements!r}.")
     report["signatureChecks"].append({
         "path": str(path.relative_to(workspace)), "strictSignaturePassed": True,
         "hasSigningTeam": False, "signatureType": "ad-hoc", "certificateAbsent": True,
@@ -149,6 +149,9 @@ try:
             "The download must embed exactly the native Mac Widget bundle.")
     info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
     widget_info = plistlib.loads((widget / "Contents" / "Info.plist").read_bytes())
+    usage_key = "NSRemindersFullAccessUsageDescription"
+    require(isinstance(info.get(usage_key), str) and info[usage_key].strip() and usage_key not in widget_info,
+            "Only the Mac app must declare its Reminders usage.")
     require(info.get("CFBundleIdentifier") == "com.panion.todo.m0.mac", "Unexpected distribution app identity.")
     require(widget_info.get("CFBundleIdentifier") == info["CFBundleIdentifier"] + ".widget", "Unexpected Widget identity.")
     require(info.get("CFBundleShortVersionString") == version, "The built version does not match MARKETING_VERSION.")
@@ -191,16 +194,19 @@ try:
     # its sandbox entitlement separate from the non-sandboxed containing app.
     run("ad-hoc-widget", ["codesign", "--force", "--sign", "-", "--timestamp=none", "--options", "runtime",
                           "--entitlements", str(ROOT / "Config" / "Widget-Distribution.entitlements"), str(widget)])
-    run("ad-hoc-app", ["codesign", "--force", "--sign", "-", "--timestamp=none", "--options", "runtime", str(app)])
+    run("ad-hoc-app", ["codesign", "--force", "--sign", "-", "--timestamp=none", "--options", "runtime",
+                       "--entitlements", str(ROOT / "Config" / "Mac-Reminders.entitlements"), str(app)])
     run("verify-app-deep", ["codesign", "--verify", "--all-architectures", "--deep", "--strict", "--verbose=2", str(app)])
-    inspect_signature(app, "app")
+    calendar_access = {"com.apple.security.personal-information.calendars": True}
+    inspect_signature(app, "app", calendar_access)
     sandbox = {"com.apple.security.app-sandbox": True}
     inspect_signature(widget, "widget", sandbox)
     report["architectureSlices"] = {}
     for index, path in enumerate(code, 1):
         slices = run(f"architectures-code-{index}", ["lipo", "-archs", str(path)], capture=True).strip().split()
         require(set(slices) == {"arm64", "x86_64"}, "Every embedded code object must be universal.")
-        inspect_signature(path, f"code-{index}", sandbox if path == widget_binary else {})
+        expected = {binary: calendar_access, widget_binary: sandbox}
+        inspect_signature(path, f"code-{index}", expected.get(path, {}))
         if path == binary:
             report["architectureSlices"]["app"] = sorted(slices)
         elif path == widget_binary:

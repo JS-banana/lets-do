@@ -422,13 +422,14 @@
 		372CACFBB867D71AF280485F /* CloudDevelopment */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Config/Mac-Cloud.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Config/Mac-Cloud-App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				INFOPLIST_FILE = "Config/App-Info.plist";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许访问提醒事项，以便从你选择的清单导入待办。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -463,13 +464,14 @@
 		82D9D1FBF96B11BF4638266C /* Local */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "";
+				CODE_SIGN_ENTITLEMENTS = "Config/Mac-Reminders.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				INFOPLIST_FILE = "Config/App-Info.plist";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许访问提醒事项，以便从你选择的清单导入待办。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -663,6 +665,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				INFOPLIST_FILE = "Config/App-Info.plist";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许访问提醒事项，以便从你选择的清单导入待办。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -796,13 +799,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = "";
+				CODE_SIGN_ENTITLEMENTS = "Config/Mac-Reminders.entitlements";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/App-Info.plist";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许访问提醒事项，以便从你选择的清单导入待办。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

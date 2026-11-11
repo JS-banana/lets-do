@@ -29,6 +29,8 @@ MacDistribution 主应用保留非沙盒运行方式，Widget 保留沙盒。其
 
 从源码运行 iPhone 可按 Xcode 支持的 Personal Team 条件配置；免费配置的有效期与能力限制不等同于公开 iPhone 分发。CloudKit 使用设备系统 Apple 账户，真实 iPhone 与跨设备同步单独验收。
 
+Mac 主应用可通过 EventKit 接入用户选择的系统提醒事项清单。配置、映射与双设备验收见[提醒事项方案](MAC-REMINDERS.md)。
+
 ## 检查与构建
 
 在仓库根目录按改动范围运行：
