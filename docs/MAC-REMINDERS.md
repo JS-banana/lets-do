@@ -1,0 +1,42 @@
+# Mac 与系统提醒事项
+
+在 iPhone 的「提醒事项」中记下一件事，在 Mac 的 Let’s Do 收集箱选择是否导入，再按周或日安排。两台设备登录同一 Apple 账户，并在 iCloud 设置里开启「提醒事项」。建议在 iCloud 下建一份「Let’s Do」清单，导入时核对账户名和清单名。同名本机清单只存在于该 Mac。[Apple 设置指引](https://support.apple.com/guide/icloud/mmbf52194b5a/icloud)
+
+## 实施顺序和数据所有权
+
+| 阶段 | 用户动作 | 保存位置与验收条件 |
+|---|---|---|
+| 1 · 手机记录，Mac 安排 | 收集箱 → 从提醒事项导入 → 授权 → 选清单 → 加入收集箱 | 导入一条才创建一个本机任务。再次打开、刷新或重试均只出现一个 UUID |
+| 2 · 指定任务发到手机 | 从 Mac 任务详情明确发送，随后在 iPhone 提醒事项中完成 | 只更新与该条发送记录关联的本机任务。阶段二在单独的变更中实施 |
+
+Let’s Do 的任务、周计划、版本、草稿和回收站继续由 TaskStore 管理。系统负责把 iCloud 清单的提醒事项送到另一台设备，两端有可能在不同时刻才看到变化。用户无需安装 iPhone 版 Let’s Do。原生 iOS 源码和 CloudKit 开发配置仍有独立的目标和验收要求。
+
+## 数据映射与失败处理
+
+| 系统提醒事项 | 导入后的 Let’s Do 任务 |
+|---|---|
+| 未完成事项的标题、纯文本备注 | 交给现有 TaskStore 建立任务和初始正文版本 |
+| 源截止日期／时间 | 候选行展示原值。新任务无日期，之后可在 Let’s Do 安排 |
+| 重复、优先级、附件、子任务结构或闹钟 | 当前导入只复制标题、备注。原项及其设置留在系统提醒事项 |
+| 已完成或已导入的原项 | 不列作新的候选。删除、完成或改名原项不会覆盖已导入的任务 |
+
+清单由用户从可写清单中选择。清单选择和关联表随当前任务库保存在本机的 `reminders-links.json`，只存标识及处理状态。先持久化任务 UUID，再调用幂等的 `createTask`，最后确认关联。清单来源、清单标识和服务端事项标识一起用于去重，当前清单中归属不唯一的来源项暂缓导入。切库丢弃旧请求的响应。Local 库升级为 MacDistribution 库时随库搬迁关联文件。任务 JSON 备份只包含任务数据，在从备份新建的隔离库中需重新选择清单。
+
+Apple 说明本机事项标识可能在完整同步后改变，服务器提供的标识也可能重复；标题或截止相同不足以判断同一事项。[本机标识](https://developer.apple.com/documentation/eventkit/ekcalendaritem/calendaritemidentifier) · [服务端标识](https://developer.apple.com/documentation/eventkit/ekcalendaritem/calendaritemexternalidentifier)
+
+## 代码、权限和签名
+
+Mac 主应用中的 [MacReminders](../App/MacReminders.swift) 封装 EventKit、选择和关联。主窗口随任务库绑定／解绑，Widget 只读取既有任务库。Mac 的四种主应用配置声明 `NSRemindersFullAccessUsageDescription`。用户主动点击授权时才请求提醒事项完整访问；系统没有只读提醒事项授权档位。清单不可用时需重新选择，拒绝后可到「隐私与安全性 → 提醒事项」恢复权限。[EventKit 授权](https://developer.apple.com/documentation/eventkit/accessing-the-event-store)
+
+分发脚本给最终主应用签入 `com.apple.security.personal-information.calendars`，校验用途文案、主程序和 Widget 各自的签名权限。这个名称涵盖 EventKit 资源，应用只请求提醒事项。该路径使用用户系统账户中的清单，MacDistribution 无需自建 CloudKit 容器或付费团队。ad hoc 签名和系统隐私授权属于不同环节，重新构建后需实际测试授权能否延续。[Hardened Runtime](https://developer.apple.com/documentation/xcode/configuring-the-hardened-runtime) · [代码签名身份](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
+
+## 验收步骤
+
+自动检查使用隔离的临时任务库和可控提醒事项来源。[测试](../Tests/MacRemindersTests.swift)覆盖导入、重试、标识变化及切库。运行 `python3 scripts/check.py unit` 和[开发说明](DEVELOPMENT.md#检查与构建)中的各配置编译，再用 `python3 scripts/package-mac.py` 检查最终 Mac 包。原生授权弹窗、系统提醒事项和跨设备传播需单独验证。
+
+用测试清单、同一个候选安装包及 SHA-256 记录结果。下列项目待真机验收：
+
+1. **首次授权与撤销。** 在 Mac 上正常使用收集箱，确认启动无弹窗。打开导入面板，分别测试拒绝和授权、系统设置恢复、运行中撤销。已有任务仍可编辑。
+2. **手机到 Mac。** 在 iPhone 的 iCloud 测试清单新增两条同名不同备注的待办，一条含到期时间。等 Mac 系统提醒事项也看得到后导入，核对备注、源截止和本机无日期。导入仅一条并重启，检查另一条仍可选。把导入任务移到回收站，再刷新，确认未被复活。
+3. **清单和离线。** 准备同名本机清单和 iCloud 清单，只选择后者。断网新建手机提醒，联网后分别记录 Mac 系统清单和 Let’s Do 可见时间。移除原清单或切换账户后检查没有从另一份同名清单导入。
+4. **安装包升级与 Widget。** 在相同安装路径用后一份真实 ad hoc 构建覆盖前一份，记录系统是否重新询问权限，复核关联保留、已导入任务可正常安排、Widget 按原任务显示。只公开系统／版本、散列、动作和结果，个人任务与账户标识留在本机。
