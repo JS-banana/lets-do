@@ -355,6 +355,9 @@ final class MacReminders: ObservableObject {
                     let scoped = items.filter { $0.scope == scope }
                     let refreshed = try ReminderLinks.read(from: store.directory)
                     if refreshed.selected == scope { updateCandidates(scoped, links: refreshed) }
+                    guard !linked.isEmpty else { continue }
+                    let handoffLock = try StoreFileLock(url: store.directory.appendingPathComponent("reminders-handoff.lock"), mode: LOCK_EX)
+                    defer { withExtendedLifetime(handoffLock) {} }
                     let byMarker = Dictionary(grouping: scoped.filter { $0.marker != nil }, by: \.marker)
                     for (id, link) in linked {
                         try reconcile(id, link: link, matches: byMarker[link.marker] ?? [], store: store)
@@ -470,6 +473,9 @@ final class MacReminders: ObservableObject {
 
     private func confirm(_ id: UUID, externalID: String, directory: URL) throws {
         try ReminderLinks.update(in: directory) { links in
+            guard let record = links.exports?[id], record.externalID == nil || record.externalID == externalID else {
+                throw PrototypeError.unavailable("提醒事项身份不一致，请核对原清单。")
+            }
             try links.updateExport(id) { $0.externalID = externalID; $0.status = .sent }
         }
         handoffStates[id] = .sent
@@ -477,7 +483,11 @@ final class MacReminders: ObservableObject {
         handoffs[id]?.status = .sent
     }
 
-    private func reconcile(_ id: UUID, link: ReminderExport, matches: [MacReminderCandidate], store: TaskStore) throws {
+    private func reconcile(_ id: UUID, link expected: ReminderExport, matches: [MacReminderCandidate], store: TaskStore) throws {
+        // Both callers hold the handoff lock; another host could have acknowledged a
+        // completion while this host was awaiting its EventKit fetch.
+        guard let link = try ReminderLinks.read(from: store.directory).exports?[id],
+              link.scope == expected.scope, link.marker == expected.marker else { return }
         guard matches.count == 1, let item = matches.first, !item.externalID.isEmpty,
               link.externalID == nil || link.externalID == item.externalID,
               let live = source.current(item.id), live == item else {
