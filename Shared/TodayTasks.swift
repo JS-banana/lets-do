@@ -65,3 +65,27 @@ struct TodayTasks<Item: ScheduledTask> {
         return (todayRows, Array(earlier.prefix(count - todayRows.count)))
     }
 }
+
+enum WeekTaskList: String, Sendable {
+    case previousWeeks = "previous-weeks"
+    case pending = "pending"
+
+    var title: String {
+        switch self {
+        case .previousWeeks: "往周未完成"
+        case .pending: "本周待安排"
+        }
+    }
+
+    func tasks<Item: ScheduledTask>(from items: [Item], weekStart: Day, timeZone: TimeZone) -> [Item] {
+        switch self {
+        case .previousWeeks:
+            return TodayTasks(items, on: weekStart, timeZone: timeZone).earlier
+        case .pending:
+            var seen = Set<UUID>()
+            return items.filter {
+                seen.insert($0.id).inserted && !$0.isCompleted && $0.schedule == .week(start: weekStart)
+            }
+        }
+    }
+}
