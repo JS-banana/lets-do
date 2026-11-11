@@ -301,6 +301,31 @@ final class MacRemindersTests: XCTestCase {
     }
 
     @MainActor
+    func testRefreshInAnotherHostCannotReplayConsumedCompletion() async throws {
+        try await withStore { store in
+            let source = ReminderSourceStub(), id = UUID()
+            let first = MacReminders(source: source), second = MacReminders(source: source)
+            first.attach(store)
+            await first.refresh()
+            await first.selectList(source.scope.listID)
+            try store.createTask(id: id, title: "保留较新的本机状态")
+            await first.sendTask(id, due: nil)
+            source.markCompleted(try XCTUnwrap(source.items.first))
+            second.attach(store)
+            source.beforeFetch = {
+                source.beforeFetch = nil
+                await second.refreshIfConnected()
+                do {
+                    XCTAssertTrue(try XCTUnwrap(store.snapshots().first).isCompleted)
+                    try store.setCompleted(id: id, completed: false)
+                } catch { XCTFail(error.localizedDescription) }
+            }
+            await first.refreshIfConnected()
+            XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
+        }
+    }
+
+    @MainActor
     func testInterruptionBeforeCompletionReceiptDoesNotRecompleteReopenedTask() async throws {
         try await withStore { store in
             let source = ReminderSourceStub(), id = UUID()
