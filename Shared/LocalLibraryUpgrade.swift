@@ -111,10 +111,12 @@ enum LocalLibraryUpgrade {
             at: stage.appendingPathComponent("tasks.sqlite"), destinationOptions: options,
             withPersistentStoreFrom: sourceStore, sourceOptions: sourceOptions, ofType: NSSQLiteStoreType)
         try copyDrafts(from: source, to: stage)
-        let audit = source.appendingPathComponent("events.jsonl")
-        if try item(audit) != .missing {
-            try require(try item(audit), oneOf: [.file])
-            try fm.copyItem(at: audit, to: stage.appendingPathComponent("events.jsonl"))
+        for name in ["events.jsonl", "reminders-links.json"] {
+            let file = source.appendingPathComponent(name)
+            if try item(file) != .missing {
+                try require(try item(file), oneOf: [.file])
+                try fm.copyItem(at: file, to: stage.appendingPathComponent(name))
+            }
         }
         let verified = try TaskStore(directory: stage)
         do {

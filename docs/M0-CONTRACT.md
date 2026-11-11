@@ -1,5 +1,7 @@
 # M0 执行与验收契约
 
+Mac 主应用的提醒事项互操作单独按[提醒事项方案](MAC-REMINDERS.md)验收。原生双端 CloudKit 任务库仍按下方矩阵验证。
+
 ## 当前范围
 
 M0 验证原生个人任务在 Mac／iPhone 上的捕获、编辑、日期安排、系统 Widget 与安全同步闭环。先推进 Mac 不取消双端门槛；只有 A／B／C／D 必需矩阵与决策冻结全部通过，才可称 M0 完成。当前唯一持久化实现为共享 Core Data／TaskStore，云配置采用 CloudKit 私有库与系统 Apple 账户，不另建应用账号密码体系。
