@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(macOS)
+import AppKit
+#endif
 
 struct ArchiveDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.json] }
@@ -16,7 +19,6 @@ struct PrototypeView: View {
     #if os(macOS)
     @Environment(\.dismissWindow) private var dismissWindow
     @FocusState private var quickEntryFocused: Bool
-    @State private var showingQuickDate = false
     @State private var mainWindowID = UUID()
     #endif
     @State private var showTrash = false
@@ -97,7 +99,7 @@ struct PrototypeView: View {
             if calendarDetailDay != nil { calendarDetailDay = day }
             #if os(macOS)
             if destination == .calendar && !hasCaptureDraft {
-                captureSession.begin(schedule: quickEntrySchedule)
+                captureSession.begin(schedule: contextCaptureSchedule)
             }
             #endif
         }
@@ -163,6 +165,7 @@ struct PrototypeView: View {
                         if geometry.size.width >= 1040 { Divider() }
                         TaskDetail(model: model, task: task, compact: geometry.size.width < 1040)
                             .id(task.id)
+                            .id(model.store.map(ObjectIdentifier.init))
                             .frame(maxWidth: geometry.size.width >= 1040 ? 340 : .infinity)
                     }
                 }
@@ -170,16 +173,17 @@ struct PrototypeView: View {
                 .searchable(text: $search, prompt: "搜索全部任务")
             }
             .navigationSplitViewStyle(.balanced)
-            .onChange(of: geometry.size.width, initial: true) { _, width in adaptColumns(width: width) }
+            .onChange(of: geometry.size.width, initial: true) { previous, width in
+                if previous == width || (previous < 840) != (width < 840) {
+                    columns = width < 840 ? .detailOnly : .all
+                }
+            }
             .onChange(of: model.selection) { _, selected in
                 if selected != nil { captureSession.mainWindowID = nil }
-                adaptColumns(width: geometry.size.width)
             }
-            .onChange(of: captureSession.mainWindowID) { _, _ in adaptColumns(width: geometry.size.width) }
             .onChange(of: model.loaded) { _, loaded in
                 if loaded {
                     captureSession.begin(schedule: quickEntrySchedule)
-                    adaptColumns(width: geometry.size.width)
                 }
             }
             .onChange(of: search) { _, value in
@@ -193,10 +197,6 @@ struct PrototypeView: View {
         .focusedSceneValue(\.newTask, newTaskAction)
     }
 
-    private func adaptColumns(width: CGFloat) {
-        columns = width < 840 || ((model.selected != nil || captureInThisWindow) && width < 1280) ? .detailOnly : .all
-    }
-
     private func navigate(_ next: MacDestination) {
         TaskWritingEditor.finishEditing()
         captureSession.mainWindowID = nil
@@ -204,7 +204,7 @@ struct PrototypeView: View {
         search = ""
         completedExpanded = false
         destination = next
-        captureSession.begin(schedule: quickEntrySchedule)
+        captureSession.begin(schedule: contextCaptureSchedule)
     }
 
     private var macSidebar: some View {
@@ -283,13 +283,16 @@ struct PrototypeView: View {
     }
 
     private var quickEntrySchedule: TaskSchedule {
-        let day: Day
+        let day = Day(date: Date(), timeZone: .current)
+        return .allDay(start: day, endExclusive: day.addingIfPossible(days: 1) ?? day)
+    }
+
+    private var contextCaptureSchedule: TaskSchedule {
         switch destination {
-        case .today: day = Day(date: Date(), timeZone: .current)
-        case .calendar: day = calendarDay
+        case .today: return quickEntrySchedule
+        case .calendar: return .allDay(start: calendarDay, endExclusive: calendarDay.addingIfPossible(days: 1) ?? calendarDay)
         default: return .none
         }
-        return .allDay(start: day, endExclusive: day.addingIfPossible(days: 1) ?? day)
     }
 
     private var quickEntry: some View {
@@ -307,34 +310,17 @@ struct PrototypeView: View {
                 }))
                     .textFieldStyle(.plain).font(.body).focused($quickEntryFocused)
                     .accessibilityIdentifier("quickTaskTitle").onSubmit(saveQuickEntry)
-                Button { activateInlineCapture(); showingQuickDate = true } label: {
-                    Image(systemName: "calendar").foregroundStyle(captureSession.plan.schedule == .none ? Color.secondary : AppStyle.accentText(colorScheme))
-                }.buttonStyle(.plain).help(AppStyle.scheduleLabel(captureSession.plan.schedule)).accessibilityLabel("添加任务日期")
-                    .popover(isPresented: $showingQuickDate) {
-                        TaskDatePopover(schedule: captureSession.plan.schedule, apply: {
-                            captureSession.plan = ScheduleForm(schedule: $0); return true
-                        }, close: { showingQuickDate = false })
-                    }
-                Button { beginContextCapture() } label: { Image(systemName: "square.and.pencil") }
-                    .buttonStyle(.plain).help("详细编辑").accessibilityLabel("详细编辑新任务").accessibilityIdentifier("newTask")
-                Button(action: saveQuickEntry) { Image(systemName: "arrow.up.circle.fill").font(.system(size: 22)) }
-                    .buttonStyle(.plain).help("添加任务（回车）").accessibilityLabel("添加任务").accessibilityIdentifier("quickTaskSave")
-                    .disabled(captureSession.content.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || captureSession.plan.error != nil)
             }
-            .padding(.horizontal, 16).frame(minHeight: 50)
-            .background(AppStyle.surface(colorScheme), in: RoundedRectangle(cornerRadius: 8))
-            .overlay { RoundedRectangle(cornerRadius: 8).stroke(quickEntryFocused ? AppStyle.accentText(colorScheme).opacity(0.55) : Color.secondary.opacity(0.18), lineWidth: 1) }
+            .padding(.horizontal, 16).frame(minHeight: 52)
+            .background(AppStyle.accent.opacity(colorScheme == .dark ? 0.14 : 0.06), in: RoundedRectangle(cornerRadius: 6))
+            .overlay { RoundedRectangle(cornerRadius: 6).stroke(quickEntryFocused ? AppStyle.accentText(colorScheme).opacity(0.55) : Color.clear, lineWidth: 1) }
             if let error = captureSession.plan.error {
                 Text(error).font(.caption).foregroundStyle(.red).padding(.leading, 16)
             } else if captureSession.status.contains("失败") || captureSession.status.contains("未能") {
                 Text(captureSession.status).font(.caption).foregroundStyle(.red).padding(.leading, 16)
-            } else if hasCaptureDraft || captureSession.plan.schedule != quickEntrySchedule {
-                Text((captureSession.content.body.isEmpty ? "" : "含备注 · ") + AppStyle.scheduleLabel(captureSession.plan.schedule))
-                    .font(.caption).foregroundStyle(.secondary).padding(.leading, 16)
             }
         }
-        .frame(maxWidth: 800)
-        .padding(.horizontal, 32).padding(.top, 12).padding(.bottom, 18)
+        .padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 16)
         .frame(maxWidth: .infinity)
         .background(AppStyle.canvas(colorScheme))
         .onChange(of: quickEntryFocused) { _, focused in
@@ -354,8 +340,10 @@ struct PrototypeView: View {
 
     private func saveQuickEntry() {
         activateInlineCapture()
-        guard captureSession.plan.error == nil,
-              !captureSession.content.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !captureSession.content.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // The simple entry always adds to today; explicit calendar dates stay
+        // in the detailed capture surface where the date is visible.
+        captureSession.plan = ScheduleForm(schedule: quickEntrySchedule)
         if captureSession.save(using: model) {
             model.selection = nil
             captureSession.begin(schedule: quickEntrySchedule)
@@ -380,21 +368,21 @@ struct PrototypeView: View {
         let finished = tasks.filter(\.isCompleted)
         let separated = query.isEmpty && destination != .completed && destination != .trash
         return ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 8) {
-                    if destination == .today && query.isEmpty {
-                        Text(AppStyle.dayLabel(today) + " · " + AppStyle.weekdayLabel(today))
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(query.isEmpty ? destination.rawValue : "搜索结果").font(.system(size: 30, weight: .semibold))
+                        Text(query.isEmpty ? destination.rawValue : "搜索结果").font(.system(size: 26, weight: .semibold))
                         Spacer()
                         if !query.isEmpty {
                             Button("结束搜索") { search = "" }.buttonStyle(.borderless)
                         }
                     }
-                    Text(!query.isEmpty ? "“\(query)” · \(tasks.count) 项" : destination == .inbox ? "先记下来，想好时间再安排。" : destination == .today ? (unfinished.isEmpty ? "给今天留一点余地。" : "\(unfinished.count) 项待办，按自己的节奏来。") : "\(tasks.count) 项任务")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                    if destination == .today && query.isEmpty {
+                        Text(AppStyle.dayLabel(today) + " · " + AppStyle.weekdayLabel(today))
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    } else if !query.isEmpty {
+                        Text("“\(query)” · \(tasks.count) 项").font(.subheadline).foregroundStyle(.secondary)
+                    }
                 }
                 if tasks.isEmpty || (separated && unfinished.isEmpty) {
                     macCollectionEmpty(hasFinished: !finished.isEmpty)
@@ -409,9 +397,8 @@ struct PrototypeView: View {
                     }.font(.subheadline).foregroundStyle(.secondary)
                 }
             }
-            .frame(maxWidth: 800, alignment: .leading)
-            .padding(.horizontal, 32).padding(.top, 30).padding(.bottom, 24)
-            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }.background(AppStyle.canvas(colorScheme))
             .accessibilityIdentifier(query.isEmpty ? "collection-\(destination)" : "searchResults")
     }
@@ -454,9 +441,9 @@ struct PrototypeView: View {
                 }.frame(maxWidth: .infinity, minHeight: 38, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityLabel("打开任务：\(task.title)").accessibilityValue(AppStyle.scheduleLabel(task.schedule))
         }
-        .padding(.vertical, 13).padding(.horizontal, 10)
+        .padding(.vertical, 6).padding(.horizontal, 6)
         .background(model.selection == task.id ? AppStyle.accent.opacity(0.07) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(alignment: .bottom) { Divider().padding(.leading, 50) }
+        .overlay(alignment: .bottom) { Divider().padding(.leading, 46) }
         .draggable(task.id.uuidString)
         .contextMenu {
             if task.deletedAt != nil {
@@ -481,7 +468,7 @@ struct PrototypeView: View {
 
     private func beginContextCapture() {
         search = ""
-        captureSession.begin(schedule: quickEntrySchedule)
+        captureSession.begin(schedule: contextCaptureSchedule)
         presentCapture(schedule: captureSession.plan.schedule)
     }
 
@@ -569,6 +556,7 @@ struct PrototypeView: View {
             .navigationDestination(item: $model.selection) { id in
                 if let task = model.tasks.first(where: { $0.id == id }) {
                     TaskDetail(model: model, task: task).id(task.id)
+                        .id(model.store.map(ObjectIdentifier.init))
                         .navigationTitle("任务详情").navigationBarTitleDisplayMode(.inline)
                 } else {
                     ContentUnavailableView("任务暂不可用", systemImage: "tray",
@@ -928,12 +916,15 @@ struct CaptureSheet: View {
                     Divider()
                     Button { TaskWritingEditor.finishEditing(); showingDate = true } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: "calendar").font(.system(size: 17)).frame(width: 24)
-                            Text(AppStyle.scheduleLabel(plan.schedule))
+                            Image(systemName: "calendar").font(.system(size: 16)).frame(width: 24)
+                            Text(AppStyle.scheduleLabel(plan.schedule)).foregroundStyle(plan.schedule == .none ? Color.secondary : .primary)
                             Spacer(minLength: 4)
                             Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
-                        }.foregroundStyle(plan.schedule == .none ? Color.secondary : AppStyle.accentText(colorScheme))
-                            .padding(.vertical, 12).contentShape(Rectangle())
+                        }.foregroundStyle(.secondary).frame(minHeight: 40)
+                        #if os(iOS)
+                        .padding(.vertical, 2)
+                        #endif
+                        .contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(!loaded).accessibilityIdentifier("captureDate")
                         .popover(isPresented: $showingDate) {
                             TaskDatePopover(schedule: plan.schedule, apply: {
@@ -972,9 +963,12 @@ struct TaskDetail: View {
     @ObservedObject var model: PrototypeModel
     let task: TaskSnapshot
     var compact = false
+    private let editingStore: TaskStore?
     @Environment(\.colorScheme) private var colorScheme
     @State private var writing = TaskWriting()
     @State private var parents: [UUID] = []
+    @State private var baselineWriting = TaskWriting()
+    @State private var baselineParents: [UUID] = []
     @State private var noteDraftID = UUID()
     @State private var initialized = false
     @State private var showingSchedule = false
@@ -982,66 +976,42 @@ struct TaskDetail: View {
     @State private var draftStatus = ""
     @State private var otherDrafts: [LocalDraft] = []
 
+    init(model: PrototypeModel, task: TaskSnapshot, compact: Bool = false) {
+        self.model = model
+        self.task = task
+        self.compact = compact
+        editingStore = model.store
+        _writing = State(initialValue: TaskWriting(title: task.title, body: task.currentNote?.body ?? "", formatting: task.currentNote?.formatting))
+        _parents = State(initialValue: task.currentNote.map { [$0.id] } ?? [])
+        _baselineWriting = State(initialValue: TaskWriting(title: task.title, body: task.currentNote?.body ?? "", formatting: task.currentNote?.formatting))
+        _baselineParents = State(initialValue: task.currentNote.map { [$0.id] } ?? [])
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                Spacer()
-                if contentChanged && task.deletedAt == nil {
-                    Button("保存", action: saveContent)
-                        .buttonStyle(.borderless).accessibilityIdentifier("contentSave")
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .disabled(writing.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                Menu {
-                    if task.deletedAt == nil {
-                        Button(task.isCompleted ? "标记为未完成" : "标记为完成") {
-                            TaskWritingEditor.finishEditing()
-                            model.toggleCompletion(task)
-                        }.accessibilityIdentifier("detailCompletion")
-                        Divider()
-                    }
-                    Button("版本记录（\(task.revisions.count)）") {
-                        TaskWritingEditor.finishEditing(); showingHistory = true
-                    }
-                        .disabled(task.revisions.isEmpty && otherDrafts.isEmpty)
-                    if task.deletedAt == nil {
-                        Divider()
-                        Button("移入回收站", role: .destructive) {
-                            if model.perform({ try $0.moveToTrash(id: task.id) }) { model.selection = nil }
-                        }.accessibilityIdentifier("trashTask")
-                    }
-                } label: { Image(systemName: "ellipsis") }
-                    #if os(macOS)
-                    .menuStyle(.borderlessButton)
-                    #endif
-                    .fixedSize().accessibilityLabel("任务更多操作").accessibilityIdentifier("taskMore")
-                #if os(macOS)
-                Button { model.selection = nil } label: {
-                    if compact { Label("返回", systemImage: "chevron.left") }
-                    else { Image(systemName: "xmark") }
-                }.buttonStyle(.plain).accessibilityLabel(compact ? "返回" : "关闭任务详情")
-                    .accessibilityIdentifier("closeTaskDetail")
-                #endif
-            }.frame(minHeight: 28).padding(.horizontal, 20).padding(.vertical, 8)
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    TaskWritingEditor(content: $writing, editable: task.deletedAt == nil, minimumHeight: 64)
+                VStack(alignment: .leading, spacing: 12) {
+                    TaskWritingEditor(content: Binding(get: { writing }, set: {
+                        writing = $0
+                        persistEditorDraft()
+                    }), editable: task.deletedAt == nil, minimumHeight: 64)
                     if draftStatus.contains("失败") || draftStatus.contains("未能") {
                         Text(draftStatus).font(.caption).foregroundStyle(.red)
-                    } else if contentChanged {
-                        Text("修改已保留在本机，保存后更新任务").font(.caption).foregroundStyle(.secondary)
                     }
-                    Divider().padding(.top, 4)
+                    Divider()
                     Button { TaskWritingEditor.finishEditing(); showingSchedule = true } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: "calendar").font(.system(size: 17))
-                                .foregroundStyle(task.schedule == .none ? Color.secondary : AppStyle.accentText(colorScheme)).frame(width: 24)
+                            Image(systemName: "calendar").font(.system(size: 16)).frame(width: 24)
                             Text(dateTitle).font(.body)
                                 .foregroundStyle(task.schedule == .none ? Color.secondary : Color.primary)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 4)
                             Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-                        }.padding(.vertical, 12).contentShape(Rectangle())
+                        }.foregroundStyle(.secondary).frame(minHeight: 40)
+                        #if os(iOS)
+                        .padding(.vertical, 2)
+                        #endif
+                        .contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(task.deletedAt != nil).help("安排日期").accessibilityIdentifier("editSchedule")
                         .popover(isPresented: $showingSchedule) {
                             TaskDatePopover(schedule: task.schedule, apply: { schedule in
@@ -1057,27 +1027,82 @@ struct TaskDetail: View {
                         Text("恢复任务后可以继续编辑。").font(.caption).foregroundStyle(.secondary)
                         Button("恢复任务") { model.perform { try $0.restoreTask(id: task.id) } }.buttonStyle(.bordered)
                     }
-                }.padding(.horizontal, 20).padding(.bottom, 24)
+                }.padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 20)
             }.accessibilityIdentifier("detail-\(task.id.uuidString)")
             Divider().padding(.horizontal, 20)
-            HStack {
+            if contentChanged && task.deletedAt == nil {
+                HStack {
+                    Text(draftStatus.contains("失败") || draftStatus.contains("未能") ? "修改尚未保存" : "草稿已保留在本机")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("保存", action: saveContent)
+                        .buttonStyle(.borderless).accessibilityIdentifier("contentSave")
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .disabled(writing.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.padding(.horizontal, 20).padding(.top, 12)
+            }
+            HStack(spacing: 12) {
+                if task.deletedAt == nil {
+                    Button(role: .destructive) {
+                        TaskWritingEditor.finishEditing()
+                        guard persistEditorDraft(), hasCurrentStore else { return }
+                        if model.perform({ try $0.moveToTrash(id: task.id) }) { model.selection = nil }
+                    } label: {
+                        Image(systemName: "trash").frame(width: 28, height: 28)
+                        #if os(iOS)
+                            .padding(8)
+                        #endif
+                    }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).help("移入回收站")
+                        .accessibilityLabel("移入回收站").accessibilityIdentifier("trashTask")
+                }
+                Spacer()
                 Text("创建于\(task.createdAt.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN"))))")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                Menu {
+                    Button("版本记录（\(task.revisions.count)）") {
+                        TaskWritingEditor.finishEditing(); showingHistory = true
+                    }.disabled(task.revisions.isEmpty && otherDrafts.isEmpty)
+                    if task.deletedAt == nil {
+                        Button(task.isCompleted ? "标记为未完成" : "标记为完成") {
+                            TaskWritingEditor.finishEditing()
+                            guard hasCurrentStore else { return }
+                            model.toggleCompletion(task)
+                        }.accessibilityIdentifier("detailCompletion")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis").foregroundStyle(.secondary).frame(width: 28, height: 28)
+                    #if os(iOS)
+                        .padding(8)
+                    #endif
+                }
+                #if os(macOS)
+                .menuStyle(.borderlessButton)
+                #endif
+                .fixedSize().help("版本记录与任务操作").accessibilityLabel("版本记录与任务操作")
+                    .accessibilityIdentifier("taskMore")
+                #if os(macOS)
+                if compact {
+                    Button { closeDetail() } label: { Image(systemName: "chevron.right").frame(width: 28, height: 28) }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).help("返回任务列表")
+                        .accessibilityLabel("返回任务列表").accessibilityIdentifier("closeTaskDetail")
+                }
+                #endif
             }.padding(.horizontal, 20).padding(.vertical, 12)
         }
         .background(AppStyle.canvas(colorScheme))
+        #if os(macOS)
+        .background(InspectorDismissal(handlesEscape: !showingSchedule && !showingHistory) { closeDetail() })
+        #endif
         .onAppear {
             guard !initialized else { return }
-            writing = TaskWriting(title: task.title, body: task.currentNote?.body ?? "", formatting: task.currentNote?.formatting)
-            parents = task.currentNote.map { [$0.id] } ?? []
             do {
-                let drafts = try model.store?.drafts().filter { $0.kind == .editor && $0.taskID == task.id } ?? []
+                let drafts = try editingStore?.drafts().filter { $0.kind == .editor && $0.taskID == task.id } ?? []
                 if let draft = drafts.first { loadDraft(draft) }
             } catch { draftStatus = "草稿恢复失败，原文件保留：\(error.localizedDescription)" }
             initialized = true
         }
-        .onChange(of: writing) { _, _ in persistEditorDraft() }
         .sheet(isPresented: $showingHistory) { versionHistory }
     }
 
@@ -1107,6 +1132,7 @@ struct TaskDetail: View {
                     ForEach(otherDrafts) { draft in
                         Button(draft.updatedAt.formatted() + " · " + String(draft.body.prefix(24))) {
                             loadDraft(draft); showingHistory = false
+                            persistEditorDraft()
                         }
                     }
                 }
@@ -1120,8 +1146,7 @@ struct TaskDetail: View {
     }
 
     private var contentChanged: Bool {
-        writing.title != task.title || writing.body != (task.currentNote?.body ?? "") ||
-        writing.formatting != task.currentNote?.formatting || Set(parents) != Set(task.currentNote.map { [$0.id] } ?? [])
+        writing != baselineWriting || Set(parents) != Set(baselineParents)
     }
 
     private var dateTitle: String {
@@ -1136,6 +1161,7 @@ struct TaskDetail: View {
 
     private func saveContent() {
         TaskWritingEditor.finishEditing()
+        guard hasCurrentStore else { return }
         let savedID = noteDraftID
         guard model.perform({
             try $0.updateContent(id: task.id, title: writing.title, revisionID: savedID,
@@ -1145,13 +1171,16 @@ struct TaskDetail: View {
             writing = TaskWriting(title: saved.title, body: saved.currentNote?.body ?? "", formatting: saved.currentNote?.formatting)
             parents = saved.currentNote.map { [$0.id] } ?? []
         }
+        baselineWriting = writing
+        baselineParents = parents
         noteDraftID = UUID()
         otherDrafts.removeAll { $0.id == savedID }
-        do { try model.store?.removeDraft(id: savedID); draftStatus = "" }
+        do { try editingStore?.removeDraft(id: savedID); draftStatus = "" }
         catch { draftStatus = "任务已保存；草稿清理失败，原文件保留。" }
     }
 
     private func loadDraft(_ draft: LocalDraft) {
+        guard hasCurrentStore else { return }
         TaskWritingEditor.finishEditing()
         writing = TaskWriting(title: draft.title, body: draft.body, formatting: draft.formatting)
         if task.revisions.contains(where: { $0.id == draft.id }) {
@@ -1159,22 +1188,83 @@ struct TaskDetail: View {
         } else { noteDraftID = draft.id; parents = draft.parentIDs }
         draftStatus = "已恢复本机草稿；远端更新不会替换正在输入的文字"
         do {
-            otherDrafts = try model.store?.drafts().filter { $0.kind == .editor && $0.taskID == task.id && $0.id != draft.id } ?? []
+            otherDrafts = try editingStore?.drafts().filter { $0.kind == .editor && $0.taskID == task.id && $0.id != draft.id } ?? []
         } catch { draftStatus = "当前草稿已恢复，其他草稿读取失败：\(error.localizedDescription)" }
     }
 
-    private func persistEditorDraft() {
-        guard initialized, let store = model.store else { return }
+    private var hasCurrentStore: Bool {
+        model.loaded && editingStore != nil && model.store === editingStore
+    }
+
+    @discardableResult
+    private func closeDetail() -> Bool {
+        TaskWritingEditor.finishEditing()
+        guard persistEditorDraft() else { return false }
+        model.selection = nil
+        return true
+    }
+
+    @discardableResult
+    private func persistEditorDraft() -> Bool {
+        guard initialized, hasCurrentStore, let store = editingStore else { return false }
         do {
             let saved = model.tasks.first { $0.id == task.id } ?? task
             let savedParents = saved.currentNote.map { [$0.id] } ?? []
-            if writing.title == saved.title && writing.body == (saved.currentNote?.body ?? "") && writing.formatting == saved.currentNote?.formatting && Set(parents) == Set(savedParents) {
+            if !contentChanged || (writing.title == saved.title && writing.body == (saved.currentNote?.body ?? "") && writing.formatting == saved.currentNote?.formatting && Set(parents) == Set(savedParents)) {
                 try store.removeDraft(id: noteDraftID); draftStatus = ""
             } else {
                 try store.saveDraft(LocalDraft(formatVersion: 1, id: noteDraftID, taskID: task.id, kind: .editor,
                                                title: writing.title, body: writing.body, parentIDs: parents, updatedAt: Date(), formatting: writing.formatting))
                 draftStatus = "修改已保存在此设备；点击保存后更新任务"
             }
-        } catch { draftStatus = "草稿未能保存：\(error.localizedDescription)" }
+            return true
+        } catch {
+            draftStatus = "草稿未能保存：\(error.localizedDescription)"
+            return false
+        }
     }
 }
+
+#if os(macOS)
+/// Observe clicks without placing a transparent hit target over the workspace.
+private struct InspectorDismissal: NSViewRepresentable {
+    let handlesEscape: Bool
+    let dismiss: () -> Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { [weak view, coordinator = context.coordinator] event in
+            guard let view, let window = view.window, event.window === window else { return event }
+            if event.type == .keyDown {
+                guard coordinator.handlesEscape, event.keyCode == 53,
+                      (window.firstResponder as? NSTextView)?.hasMarkedText() != true else { return event }
+                _ = coordinator.dismiss()
+                return nil
+            }
+            guard !view.bounds.contains(view.convert(event.locationInWindow, from: nil)) else { return event }
+            return coordinator.dismiss() ? event : nil
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.dismiss = dismiss
+        context.coordinator.handlesEscape = handlesEscape
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(handlesEscape: handlesEscape, dismiss: dismiss) }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor) }
+    }
+
+    final class Coordinator {
+        var dismiss: () -> Bool
+        var handlesEscape: Bool
+        var monitor: Any?
+        init(handlesEscape: Bool, dismiss: @escaping () -> Bool) {
+            self.handlesEscape = handlesEscape
+            self.dismiss = dismiss
+        }
+    }
+}
+#endif
