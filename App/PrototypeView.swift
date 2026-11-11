@@ -32,6 +32,7 @@ struct PrototypeView: View {
     @State private var destination = MacDestination.today
     @State private var columns = NavigationSplitViewVisibility.all
     @State private var showingUnscheduled = false
+    @State private var showingReminderImport = false
     #else
     @State private var section = Workspace.month
     @State private var phoneTab = PhoneTab.today
@@ -83,6 +84,9 @@ struct PrototypeView: View {
         Group {
             #if os(macOS)
             macWorkspace
+                .sheet(isPresented: $showingReminderImport) {
+                    MacReminderImportView(reminders: model.reminders)
+                }
             #else
             phoneWorkspace
             #endif
@@ -99,6 +103,9 @@ struct PrototypeView: View {
         .sheet(isPresented: $showingInfo) { storageInfo }
         .onChange(of: model.storePath) { _, _ in
             search = ""
+            #if os(macOS)
+            showingReminderImport = false
+            #endif
         }
         .onChange(of: calendarDay) { _, day in
             if calendarDetailDay != nil { calendarDetailDay = day }
@@ -382,6 +389,9 @@ struct PrototypeView: View {
                         Spacer()
                         if !query.isEmpty {
                             Button("结束搜索") { search = "" }.buttonStyle(.borderless)
+                        } else if destination == .inbox && model.loaded {
+                            Button("从提醒事项导入", systemImage: "tray.and.arrow.down") { showingReminderImport = true }
+                                .buttonStyle(.borderless)
                         }
                     }
                     if destination == .today && query.isEmpty {

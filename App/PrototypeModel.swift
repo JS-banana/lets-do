@@ -26,6 +26,9 @@ final class PrototypeModel: ObservableObject {
     }
     @Published var completionFeedback: CompletionFeedback?
     let capture = CaptureDraft()
+    #if os(macOS)
+    let reminders = MacReminders()
+    #endif
     private(set) var store: TaskStore?
     private var accountObserver: NSObjectProtocol?
     private var starting = false
@@ -99,6 +102,9 @@ final class PrototypeModel: ObservableObject {
         accountCheckID = UUID()
         checkingAccount = true
         capture.detach()
+        #if os(macOS)
+        reminders.attach(nil)
+        #endif
         defer {
             starting = false
             checkingAccount = false
@@ -187,6 +193,9 @@ final class PrototypeModel: ObservableObject {
             }
             loaded = true
             capture.attach(to: opened, tasks: tasks)
+            #if os(macOS)
+            reminders.attach(opened)
+            #endif
             if StoreSession.isMacDistributionBuild { startedDistributionDirectory = directory }
         } catch {
             try? store?.close()
