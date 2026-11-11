@@ -1,23 +1,35 @@
+# macOS metadata.
 .DS_Store
+
+# Local build artifacts; generated test/debug logs and evidence belong in .build/.
 .build/
 build/
 DerivedData/
+
+# Developer-local signing configuration.
 Config/Signing.local.xcconfig
+
+# Xcode per-user state.
 *.xcuserstate
 xcuserdata/
+
+# Local databases and generated test results.
 *.sqlite*
 *.xcresult/
 
-# Machine-local design tools; project design rules and evidence stay versioned.
+# Machine-local tools and settings; shared design rules and briefs stay versioned.
+.claude/settings.local.json
 .agents/skills/impeccable/
 .claude/skills/impeccable/
 .claude/agents/impeccable-*.md
 .impeccable/config.local.json
 
-# Signing credentials and generated distribution files stay local.
+# Signing credentials.
 *.p12
 *.pfx
 *.mobileprovision
 *.provisionprofile
+
+# Generated distribution packages and Python caches.
 dist/
 __pycache__/
