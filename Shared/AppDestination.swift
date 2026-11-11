@@ -3,6 +3,8 @@ import Foundation
 enum CalendarPresentation: String, Equatable, Sendable { case week, month, agenda }
 
 enum AppDestination: Equatable, Sendable {
+    case today
+    case inbox
     case task(UUID)
     case calendar(Day, CalendarPresentation)
     case capture(TaskSchedule)
@@ -15,6 +17,8 @@ enum AppDestination: Equatable, Sendable {
         var parts = URLComponents()
         parts.scheme = Self.scheme
         switch self {
+        case .today: parts.host = "open"; parts.path = "/today"
+        case .inbox: parts.host = "open"; parts.path = "/inbox"
         case .task(let id): parts.host = "task"; parts.path = "/\(id.uuidString)"
         case .calendar(let day, let view):
             parts.host = "calendar"; parts.path = "/\(day.rawValue)"
@@ -38,6 +42,13 @@ enum AppDestination: Equatable, Sendable {
         let queries = parts.queryItems ?? []
         guard Set(queries.map(\.name)).count == queries.count else { return nil }
         switch parts.host?.lowercased() {
+        case "open":
+            guard queries.isEmpty else { return nil }
+            switch path {
+            case ["today"]: self = .today
+            case ["inbox"]: self = .inbox
+            default: return nil
+            }
         case "task":
             guard path.count == 1, let id = UUID(uuidString: path[0]), queries.isEmpty else { return nil }
             self = .task(id)

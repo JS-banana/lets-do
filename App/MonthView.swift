@@ -399,6 +399,7 @@ struct MonthView: View {
         .help(hasTasks ? "查看当天任务" : "选择这一天")
         .opacity(isCurrentMonth ? 1 : 0.42)
         .accessibilityLabel(dayAccessibilityLabel(day, isToday: isToday, isSelected: isSelected))
+        .accessibilityValue("\(dayTasks.count)项，\(dayTasks.filter { !$0.isCompleted }.count)项未完成")
         .accessibilityHint(hasTasks ? "查看当天任务" : "选择这一天")
         .accessibilityIdentifier("day-\(day.rawValue)")
     }

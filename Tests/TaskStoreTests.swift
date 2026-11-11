@@ -328,6 +328,56 @@ final class TaskStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testBodyOnlyEditAndRestoredDraftKeepAConcurrentTitleChange() throws {
+        try withStore { store in
+            let id = UUID()
+            try store.createTask(id: id, title: "原始标题", body: "原始正文")
+            let original = try XCTUnwrap(store.snapshots().first)
+            let draft = LocalDraft(formatVersion: 1, id: UUID(), taskID: id, kind: .editor,
+                                   title: original.title, body: "本机新正文", parentIDs: [id], updatedAt: Date(),
+                                   originalTitle: original.title)
+            try store.saveDraft(draft)
+            try store.updateTitle(id: id, title: "另一端改的标题")
+            let change = TaskStore.titleChange(draft.title, from: original.title)
+            XCTAssertNil(change)
+            try store.updateContent(id: id, title: change, revisionID: draft.id, body: draft.body,
+                                    formatting: nil, parentIDs: draft.parentIDs)
+            let edited = try XCTUnwrap(store.snapshots().first)
+            XCTAssertEqual(edited.title, "另一端改的标题")
+            XCTAssertEqual(edited.currentNote?.body, draft.body)
+
+            let recovered = try XCTUnwrap(store.drafts().first)
+            XCTAssertEqual(recovered.originalTitle, original.title)
+            let title = recovered.editorTitle(current: edited.title)
+            XCTAssertEqual(title.text, edited.title)
+            XCTAssertNil(TaskStore.titleChange(title.text, from: title.baseline))
+            XCTAssertFalse(title.needsChoice)
+            XCTAssertNil(TaskStore.titleChange(" 原始标题 ", from: original.title))
+            try store.updateContent(id: id, title: TaskStore.titleChange("本机改名", from: title.baseline),
+                                    revisionID: UUID(), body: draft.body, formatting: nil, parentIDs: [draft.id])
+            XCTAssertEqual(try store.snapshots().first?.title, "本机改名")
+        }
+    }
+
+    func testRestoringRenamedAndLegacyDraftTitlesPreservesBothChoices() throws {
+        var draft = LocalDraft(formatVersion: 1, id: UUID(), taskID: UUID(), kind: .editor,
+                               title: "草稿标题", body: "编辑中", parentIDs: [], updatedAt: Date())
+        // Old draft JSON has no title baseline; never infer a rename from a mismatch.
+        let legacy = try JSONDecoder().decode(LocalDraft.self, from: JSONEncoder().encode(draft))
+        let ambiguous = legacy.editorTitle(current: "当前标题")
+        XCTAssertNil(legacy.originalTitle)
+        XCTAssertTrue(ambiguous.needsChoice)
+        XCTAssertEqual(ambiguous.text, draft.title)
+        XCTAssertEqual(ambiguous.baseline, "当前标题")
+        XCTAssertFalse(legacy.editorTitle(current: draft.title).needsChoice)
+        draft.originalTitle = "原始标题"
+        let renamed = draft.editorTitle(current: "当前标题")
+        XCTAssertEqual(renamed.text, draft.title)
+        XCTAssertEqual(TaskStore.titleChange(renamed.text, from: renamed.baseline), draft.title)
+        XCTAssertFalse(renamed.needsChoice)
+    }
+
+    @MainActor
     func testWritingArchiveAndLegacyDraftRetainPlainTextAndFormatting() throws {
         try withStore { source in
             let id = UUID(), style = NoteFormatting(bold: [.init(location: 0, length: 2)])
@@ -650,6 +700,23 @@ final class TaskStoreTests: XCTestCase {
                 XCTAssertEqual(try target.snapshots().count, 1)
             }
         }
+    }
+
+    func testExportAndImportShareTheArchiveByteLimit() throws {
+        let taskID = UUID(), now = Date()
+        let body = String(repeating: "x", count: 1_000_000)
+        let notes = (0..<20).map { _ in
+            NoteRevision(id: UUID(), taskID: taskID, body: body, parentIDs: [], createdAt: now)
+        }
+        let task = TaskSnapshot(id: taskID, title: "历史", createdAt: now, updatedAt: now, completedAt: nil,
+                                deletedAt: nil, schedule: .none, currentRevisionID: notes.last?.id, revisions: notes)
+        let archive = TaskArchive(formatVersion: 1, modelVersion: 1, exportedAt: now, tasks: [task])
+        XCTAssertThrowsError(try archive.encoded()) { XCTAssertTrue($0.localizedDescription.contains("20 MB")) }
+        let oldEncoder = JSONEncoder()
+        oldEncoder.dateEncodingStrategy = .millisecondsSince1970
+        let oldExport = try oldEncoder.encode(archive)
+        XCTAssertGreaterThan(oldExport.count, 20_000_000)
+        XCTAssertThrowsError(try TaskArchive.decode(oldExport)) { XCTAssertTrue($0.localizedDescription.contains("20 MB")) }
     }
 
     @MainActor

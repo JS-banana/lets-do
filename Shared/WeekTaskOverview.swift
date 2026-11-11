@@ -27,6 +27,7 @@ public struct WeekTaskOverview: Sendable {
     public let today: Group
     public let upcoming: [Group]
     public let pendingCount: Int
+    public let pastScheduledCount: Int
     public let otherScheduledCount: Int
     public let completedTodayCount: Int
     public let completedWeekCount: Int
@@ -173,6 +174,7 @@ public struct WeekTaskOverview: Sendable {
             ),
             upcoming: upcoming,
             pendingCount: pendingTasks.count,
+            pastScheduledCount: pastTaskCount,
             otherScheduledCount: otherScheduledCount,
             completedTodayCount: completedTodayCount,
             completedWeekCount: completedWeekCount

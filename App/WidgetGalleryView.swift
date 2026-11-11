@@ -7,7 +7,7 @@ struct WidgetGalleryView: View {
     let open: (URL) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    @State private var mode = CalendarWidgetMode.week
+    @State private var mode = CalendarWidgetMode.today
     @State private var family = WidgetFamily.systemMedium
 
     var body: some View {
@@ -19,14 +19,18 @@ struct WidgetGalleryView: View {
             }
             HStack {
                 Picker("内容", selection: $mode) {
+                    Text("今天").tag(CalendarWidgetMode.today)
                     Text("本周计划").tag(CalendarWidgetMode.week)
                     Text("月历总览").tag(CalendarWidgetMode.month)
                 }.pickerStyle(.segmented).frame(width: 230)
                 Spacer()
                 Picker("尺寸", selection: $family) {
-                    if mode == .week { Text("中号").tag(WidgetFamily.systemMedium) }
-                    Text("大号").tag(WidgetFamily.systemLarge)
-                    Text("宽版").tag(WidgetFamily.systemExtraLarge)
+                    if mode == .today { Text("小号").tag(WidgetFamily.systemSmall) }
+                    if mode != .month { Text("中号").tag(WidgetFamily.systemMedium) }
+                    if mode != .today {
+                        Text("大号").tag(WidgetFamily.systemLarge)
+                        Text("宽版").tag(WidgetFamily.systemExtraLarge)
+                    }
                 }.pickerStyle(.segmented).frame(width: 190)
             }
             WidgetCalendarView(date: Date(), tasks: model.active.map {
@@ -34,7 +38,8 @@ struct WidgetGalleryView: View {
             }, mode: mode, family: family, complete: { id in
                 model.perform { try $0.setCompleted(id: id, completed: true) }
             })
-            .frame(width: family == .systemExtraLarge ? 704 : 344, height: family == .systemMedium ? 164 : 344)
+            .frame(width: family == .systemSmall ? 164 : family == .systemExtraLarge ? 704 : 344,
+                   height: family == .systemMedium || family == .systemSmall ? 164 : 344)
             .background(AppStyle.surface(colorScheme), in: RoundedRectangle(cornerRadius: 20))
             .environment(\.openURL, OpenURLAction { url in open(url); return .handled })
             .frame(maxWidth: .infinity)
@@ -44,7 +49,11 @@ struct WidgetGalleryView: View {
         .background(AppStyle.canvas(colorScheme))
         .tint(AppStyle.accentText(colorScheme))
         .onChange(of: mode) { _, value in
-            if value == .month && family == .systemMedium { family = .systemLarge }
+            switch value {
+            case .today: if family != .systemSmall { family = .systemMedium }
+            case .week: if family == .systemSmall { family = .systemMedium }
+            case .month: if family != .systemExtraLarge { family = .systemLarge }
+            }
         }
     }
 }
