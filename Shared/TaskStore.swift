@@ -689,14 +689,15 @@ final class TaskStore {
     }
 
     @discardableResult
-    func setCompleted(id: UUID, completed: Bool) throws -> UUID {
-        let actionID = UUID()
-        try mutate("task.complete", id: id, actionID: actionID) {
+    func setCompleted(id: UUID, completed: Bool, actionID: UUID? = nil) throws -> UUID {
+        let completionActionID = actionID ?? UUID()
+        try mutate("task.complete", id: id, actionID: completionActionID,
+                   skipCommittedAction: actionID != nil) {
             if completed {
                 if $0.value(forKey: "completedAt") == nil { $0.setValue(Date(), forKey: "completedAt") }
             } else { $0.setValue(nil, forKey: "completedAt") }
         }
-        return actionID
+        return completionActionID
     }
 
     func moveToTrash(id: UUID) throws {
@@ -707,9 +708,32 @@ final class TaskStore {
         try mutate("task.restore", id: id, allowTrashed: true) { $0.setValue(nil, forKey: "deletedAt") }
     }
 
+    // A caller may reuse an action UUID only to retry the same write. History is saved
+    // atomically with the task and retained even after consumeHistory advances its cursor.
+    private func hasCommittedAction(_ actionID: UUID, in context: NSManagedObjectContext) throws -> Bool {
+        guard let entity = NSPersistentHistoryTransaction.entityDescription(with: context) else {
+            throw PrototypeError.unavailable("无法核对已提交的完成操作；任务保持原状。")
+        }
+        let transactions = NSFetchRequest<NSFetchRequestResult>()
+        transactions.entity = entity
+        transactions.predicate = NSPredicate(format: "author IN %@", ["app:\(actionID.uuidString)", "widget:\(actionID.uuidString)"])
+        transactions.fetchLimit = 1
+        let request = NSPersistentHistoryChangeRequest.fetchHistory(after: nil as NSPersistentHistoryToken?)
+        request.fetchRequest = transactions
+        request.resultType = .transactionsOnly
+        guard let result = try context.execute(request) as? NSPersistentHistoryResult,
+              result.resultType == .transactionsOnly,
+              let history = result.result as? [NSPersistentHistoryTransaction] else {
+            throw PrototypeError.unavailable("无法核对已提交的完成操作；任务保持原状。")
+        }
+        return !history.isEmpty
+    }
+
     private func mutate(_ action: String, id: UUID, actionID: UUID = UUID(), allowTrashed: Bool = false,
+                        skipCommittedAction: Bool = false,
                         _ body: (NSManagedObject) throws -> Void) throws {
-        try write(action, id: id, actionID: actionID) { _ in
+        try write(action, id: id, actionID: actionID) { context in
+            if skipCommittedAction, try hasCommittedAction(actionID, in: context) { return }
             let items = try matching(id)
             guard !items.isEmpty else { throw PrototypeError.missingTask }
             guard allowTrashed || items.allSatisfy({ $0.value(forKey: "deletedAt") == nil }) else { throw PrototypeError.trashed }

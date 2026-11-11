@@ -2,6 +2,9 @@ import CloudKit
 import Combine
 import Foundation
 import WidgetKit
+#if os(macOS)
+import EventKit
+#endif
 
 @MainActor
 final class PrototypeModel: ObservableObject {
@@ -28,6 +31,15 @@ final class PrototypeModel: ObservableObject {
     let capture = CaptureDraft()
     #if os(macOS)
     let reminders = MacReminders()
+    private var reminderChanges: AnyCancellable?
+
+    init() {
+        reminderChanges = NotificationCenter.default.publisher(for: .EKEventStoreChanged)
+            .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in await self?.reminders.refreshIfConnected() }
+            }
+    }
     #endif
     private(set) var store: TaskStore?
     private var accountObserver: NSObjectProtocol?
@@ -195,6 +207,7 @@ final class PrototypeModel: ObservableObject {
             capture.attach(to: opened, tasks: tasks)
             #if os(macOS)
             reminders.attach(opened)
+            Task { await reminders.refreshIfConnected() }
             #endif
             if StoreSession.isMacDistributionBuild { startedDistributionDirectory = directory }
         } catch {

@@ -1,4 +1,5 @@
 #if os(macOS)
+import Darwin
 import Foundation
 import XCTest
 @testable import TodoM0
@@ -10,16 +11,40 @@ private final class ReminderSourceStub: MacReminderSource {
     var permissionRequests = 0
     let scope = MacReminderScope(sourceID: "test-account", listID: "test-inbox")
     var available = true
+    var otherLists: [MacReminderList] = []
+    var listReads = 0
+    var sends = 0
+    var lastDue: Day?
+    var failBeforeSave = false
+    var failAfterSave = false
+
     var items: [MacReminderCandidate] = []
-    var beforeFetch: (() async -> Void)?
+    var beforeFetch: (@MainActor () async -> Void)?
 
     func requestAccess() async throws { permissionRequests += 1; authorized = true }
     func lists() -> [MacReminderList] {
-        available ? [.init(scope: scope, title: "收集箱", sourceTitle: "测试账户")] : []
+        listReads += 1
+        return (available ? [.init(scope: scope, title: "收集箱", sourceTitle: "测试账户")] : []) + otherLists
     }
-    func reminders(in scope: MacReminderScope) async throws -> [MacReminderCandidate] {
+    func reminders(in scope: MacReminderScope, includingCompleted: Bool) async throws -> [MacReminderCandidate] {
         await beforeFetch?()
-        return items.filter { $0.scope == scope }
+        return items.filter { $0.scope == scope && (includingCompleted || !$0.completed) }
+    }
+    func create(title: String, due: Day?, marker: URL, in scope: MacReminderScope) throws -> MacReminderCandidate {
+        if failBeforeSave { throw PrototypeError.unavailable("simulated interruption before system save") }
+        sends += 1
+        lastDue = due
+        let item = MacReminderCandidate(id: "local-\(sends)", externalID: "external-\(sends)", scope: scope,
+                                        title: title, notes: "", completed: false, marker: marker)
+        items.append(item)
+        if failAfterSave { throw PrototypeError.unavailable("simulated ambiguous save") }
+        return item
+    }
+
+    func markCompleted(_ item: MacReminderCandidate) {
+        let replacement = MacReminderCandidate(id: item.id, externalID: item.externalID, scope: item.scope,
+                                              title: item.title, notes: item.notes, completed: true, marker: item.marker)
+        items = items.map { $0.id == item.id ? replacement : $0 }
     }
     func current(_ id: String) -> MacReminderCandidate? { items.first { $0.id == id } }
     func item(_ local: String, external: String, title: String = "待安排") -> MacReminderCandidate {
@@ -134,6 +159,279 @@ final class MacRemindersTests: XCTestCase {
             tool.importCandidate(first)
             XCTAssertTrue(try store.snapshots().isEmpty)
             XCTAssertEqual(try Data(contentsOf: sidecar), damaged)
+        }
+    }
+
+    @MainActor
+    func testHandoffCanCompleteFromPreviouslySelectedListWithoutResendingOrEchoImport() async throws {
+        try await withStore { store in
+            let source = ReminderSourceStub()
+            let other = MacReminderList(scope: .init(sourceID: "other-account", listID: "another-list"),
+                                        title: "另一张清单", sourceTitle: "另一个账户")
+            source.otherLists = [other]
+            let tool = MacReminders(source: source)
+            tool.attach(store)
+            await tool.refreshIfConnected()
+            XCTAssertEqual(source.listReads, 0)
+            await tool.refresh()
+            await tool.selectList(source.scope.listID)
+            let id = UUID(), monday = try Day("2026-11-09"), due = try Day("2026-11-13")
+            try store.createTask(id: id, title: "本周安排", schedule: .week(start: monday), body: "私有笔记")
+            await tool.sendTask(id, due: due)
+            let remote = try XCTUnwrap(source.items.first)
+            XCTAssertEqual(source.lastDue, due)
+            XCTAssertTrue(remote.notes.isEmpty)
+            XCTAssertEqual(tool.handoffStatus(for: id), .sent)
+            await tool.refresh()
+            XCTAssertTrue(tool.candidates.isEmpty)
+            await tool.selectList(other.id)
+            source.markCompleted(remote)
+            await tool.refreshIfConnected()
+            let local = try XCTUnwrap(store.snapshots().first)
+            XCTAssertTrue(local.isCompleted)
+            XCTAssertEqual(local.schedule, .week(start: monday))
+            XCTAssertEqual(local.currentNote?.body, "私有笔记")
+            try store.setCompleted(id: id, completed: false)
+            await tool.refresh()
+            XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
+            source.items = []
+            await tool.refresh()
+            XCTAssertEqual(tool.handoffStatus(for: id), .needsReview)
+            await tool.sendTask(id, due: nil)
+            XCTAssertEqual(source.sends, 1)
+        }
+    }
+
+    @MainActor
+    func testAmbiguousSaveAndCopiedOrStrippedMarkerNeverDuplicateOrApplyWrongCompletion() async throws {
+        try await withStore { store in
+            let source = ReminderSourceStub(), id = UUID()
+            let tool = MacReminders(source: source)
+            tool.attach(store)
+            await tool.refresh()
+            await tool.selectList(source.scope.listID)
+            try store.createTask(id: id, title: "仍为本机原件")
+            source.failAfterSave = true
+            await tool.sendTask(id, due: nil)
+            let original = try XCTUnwrap(source.items.first)
+            XCTAssertEqual(tool.handoffStatus(for: id), .needsReview)
+            let reopened = MacReminders(source: source)
+            reopened.attach(store)
+            await reopened.sendTask(id, due: nil)
+            XCTAssertEqual(source.sends, 1)
+            await reopened.refresh()
+            XCTAssertEqual(reopened.handoffStatus(for: id), .sent)
+            source.markCompleted(original)
+            let copy = MacReminderCandidate(id: "copy", externalID: "copy-remote", scope: source.scope,
+                                            title: original.title, notes: "", completed: true, marker: original.marker)
+            source.items.append(copy)
+            await reopened.refresh()
+            XCTAssertEqual(reopened.handoffStatus(for: id), .needsReview)
+            XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
+            source.items = [copy]
+            await reopened.refresh()
+            XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
+            source.items = [.init(id: original.id, externalID: original.externalID, scope: original.scope,
+                                  title: original.title, notes: "", completed: true)]
+            await reopened.refresh()
+            XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
+            XCTAssertEqual(source.sends, 1)
+        }
+    }
+
+    @MainActor
+    func testExplicitRetryRetainsOriginalDueAndListAndNeverRecreatesConfirmedItem() async throws {
+        try await withStore { store in
+            let source = ReminderSourceStub(), id = UUID(), originalDue = try Day("2026-11-22")
+            let second = MacReminderList(scope: .init(sourceID: "account-B", listID: "B"),
+                                        title: "第二张清单", sourceTitle: "账户 B")
+            source.otherLists = [second]
+            let tool = MacReminders(source: source)
+            tool.attach(store)
+            await tool.refresh()
+            await tool.selectList(source.scope.listID)
+            try store.createTask(id: id, title: "待重试的发送")
+            source.failBeforeSave = true
+            await tool.sendTask(id, due: originalDue)
+            XCTAssertTrue(tool.canRetryHandoff(for: id))
+            source.failBeforeSave = false
+            await tool.selectList(second.id)
+            XCTAssertEqual(tool.handoffListLabel(for: id), "测试账户 · 收集箱")
+            await tool.refreshIfConnected()
+            XCTAssertEqual(source.sends, 0)
+            await tool.retryHandoff(id, due: nil)
+            XCTAssertEqual(source.items.first?.scope, source.scope)
+            XCTAssertEqual(source.lastDue, originalDue)
+            XCTAssertFalse(tool.canRetryHandoff(for: id))
+            let sent = try XCTUnwrap(source.items.first)
+            source.items = [.init(id: sent.id, externalID: sent.externalID, scope: sent.scope,
+                                  title: sent.title, notes: "", completed: false)]
+            await tool.selectList(source.scope.listID)
+            XCTAssertTrue(tool.candidates.isEmpty)
+            XCTAssertEqual(tool.handoffStatus(for: id), .needsReview)
+            source.items = []
+            await tool.refresh()
+            await tool.retryHandoff(id, due: nil)
+            XCTAssertEqual(source.sends, 1)
+        }
+    }
+
+    @MainActor
+    func testExplicitRetryFindsPreviouslyWrittenReminderWithoutSecondWrite() async throws {
+        try await withStore { store in
+            let source = ReminderSourceStub(), id = UUID()
+            let tool = MacReminders(source: source)
+            tool.attach(store)
+            await tool.refresh()
+            await tool.selectList(source.scope.listID)
+            try store.createTask(id: id, title: "事件库已提交")
+            source.failAfterSave = true
+            await tool.sendTask(id, due: nil)
+            let original = try XCTUnwrap(source.items.first)
+            var copy = source.item("unrelated-copy", external: "copy")
+            copy.marker = original.marker
+            source.items.append(copy)
+            await tool.retryHandoff(id, due: nil)
+            XCTAssertEqual(source.sends, 1)
+            XCTAssertEqual(tool.handoffStatus(for: id), .needsReview)
+            source.items.removeLast()
+            await tool.retryHandoff(id, due: nil)
+            XCTAssertEqual(source.sends, 1)
+            XCTAssertEqual(tool.handoffStatus(for: id), .sent)
+        }
+    }
+
+    @MainActor
+    func testRefreshInAnotherHostCannotReplayConsumedCompletion() async throws {
+        try await withStore { store in
+            let source = ReminderSourceStub(), id = UUID()
+            let first = MacReminders(source: source), second = MacReminders(source: source)
+            first.attach(store)
+            await first.refresh()
+            await first.selectList(source.scope.listID)
+            try store.createTask(id: id, title: "保留较新的本机状态")
+            await first.sendTask(id, due: nil)
+            source.markCompleted(try XCTUnwrap(source.items.first))
+            let secondStore = try TaskStore(directory: store.directory)
+            defer { try? secondStore.close() }
+            second.attach(secondStore)
+            source.beforeFetch = {
+                source.beforeFetch = nil
+                await second.refreshIfConnected()
+                do {
+                    XCTAssertTrue(try XCTUnwrap(store.snapshots().first).isCompleted)
+                    try store.setCompleted(id: id, completed: false)
+                } catch { XCTFail(error.localizedDescription) }
+            }
+            await first.refreshIfConnected()
+            XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
+        }
+    }
+
+    @MainActor
+    func testInterruptionBeforeCompletionReceiptDoesNotRecompleteReopenedTask() async throws {
+        for alreadyCompleted in [false, true] {
+            try await withStore { store in
+                let source = ReminderSourceStub(), id = UUID()
+                let tool = MacReminders(source: source)
+                tool.attach(store)
+                await tool.refresh()
+                await tool.selectList(source.scope.listID)
+                try store.createTask(id: id, title: "不要覆盖重开")
+                await tool.sendTask(id, due: nil)
+                if alreadyCompleted { try store.setCompleted(id: id, completed: true) }
+                source.markCompleted(try XCTUnwrap(source.items.first))
+                let file = store.directory.appendingPathComponent("reminders-links.json")
+                var pending = Data()
+                store.onChange = { pending = (try? Data(contentsOf: file)) ?? Data() }
+                await tool.refresh()
+                store.onChange = nil
+                XCTAssertFalse(pending.isEmpty)
+                XCTAssertTrue(try XCTUnwrap(store.snapshots().first).isCompleted)
+                try pending.write(to: file, options: .atomic)
+                try store.setCompleted(id: id, completed: false)
+                try store.consumeHistory()
+                try store.close()
+                let reopenedStore = try TaskStore(directory: store.directory)
+                defer { try? reopenedStore.close() }
+                let reopened = MacReminders(source: source)
+                reopened.attach(reopenedStore)
+                await reopened.refresh()
+                XCTAssertFalse(try XCTUnwrap(reopenedStore.snapshots().first).isCompleted)
+            }
+        }
+    }
+
+    @MainActor
+    func testFailedCompletionRetriesAfterUnrelatedTaskEdits() async throws {
+        try await withStore { store in
+            let source = ReminderSourceStub(), id = UUID()
+            let tool = MacReminders(source: source)
+            tool.attach(store)
+            await tool.refresh()
+            await tool.selectList(source.scope.listID)
+            try store.createTask(id: id, title: "原标题", body: "原正文")
+            await tool.sendTask(id, due: nil)
+            source.markCompleted(try XCTUnwrap(source.items.first))
+            do {
+                let lock = try StoreFileLock(url: store.directory.appendingPathComponent("write.lock"), mode: LOCK_EX)
+                defer { withExtendedLifetime(lock) {} }
+                await tool.refresh()
+                XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
+                XCTAssertEqual(tool.message, PrototypeError.busy.localizedDescription)
+            }
+            let schedule = TaskSchedule.week(start: try Day("2026-11-09"))
+            try store.updateTitle(id: id, title: "改过的标题")
+            try store.scheduleTask(id: id, schedule: schedule)
+            try store.saveNoteRevision(taskID: id, id: UUID(), body: "改过的正文", parentIDs: [id])
+            await tool.refresh()
+            let task = try XCTUnwrap(store.snapshots().first)
+            XCTAssertTrue(task.isCompleted)
+            XCTAssertEqual(task.title, "改过的标题")
+            XCTAssertEqual(task.schedule, schedule)
+            XCTAssertEqual(task.currentNote?.body, "改过的正文")
+            try store.setCompleted(id: id, completed: false)
+            await tool.refresh()
+            XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
+        }
+    }
+
+    @MainActor
+    func testLegacyInterruptedCompletionRequiresReviewWithoutConsumingOrReclosing() async throws {
+        try await withStore { store in
+            let source = ReminderSourceStub(), id = UUID()
+            let tool = MacReminders(source: source)
+            tool.attach(store)
+            await tool.refresh()
+            await tool.selectList(source.scope.listID)
+            try store.createTask(id: id, title: "保留旧版中断状态")
+            await tool.sendTask(id, due: nil)
+            source.markCompleted(try XCTUnwrap(source.items.first))
+            let file = store.directory.appendingPathComponent("reminders-links.json")
+            var state = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+            var exports = try XCTUnwrap(state["exports"] as? [Any])
+            let index = try XCTUnwrap(exports.firstIndex { ($0 as? String) == id.uuidString }) + 1
+            var link = try XCTUnwrap(exports[index] as? [String: Any])
+            link["pendingCompletionBaseline"] = try XCTUnwrap(store.snapshots().first).updatedAt.timeIntervalSinceReferenceDate
+            exports[index] = link
+            state["exports"] = exports
+            try JSONSerialization.data(withJSONObject: state).write(to: file, options: .atomic)
+            await tool.refresh()
+            XCTAssertEqual(tool.handoffStatus(for: id), .needsReview)
+            XCTAssertTrue(tool.message?.contains("旧版完成回收曾中断") == true)
+            XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
+            try store.updateTitle(id: id, title: "只改标题")
+            let reopened = MacReminders(source: source)
+            reopened.attach(store)
+            await reopened.refresh()
+            XCTAssertEqual(reopened.handoffStatus(for: id), .needsReview)
+            XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
+            let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+            let savedExports = try XCTUnwrap(saved["exports"] as? [Any])
+            let savedLink = try XCTUnwrap(savedExports[index] as? [String: Any])
+            XCTAssertEqual(savedLink["completionApplied"] as? Bool, false)
+            XCTAssertNotNil(savedLink["pendingCompletionBaseline"])
+            XCTAssertNil(savedLink["pendingCompletionActionID"])
         }
     }
 
