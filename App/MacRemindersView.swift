@@ -91,4 +91,82 @@ struct MacReminderListPicker: View {
         }
     }
 }
+struct MacReminderHandoffView: View {
+    @ObservedObject var reminders: MacReminders
+    let task: TaskSnapshot
+    let isCurrent: () -> Bool
+    @Environment(\.dismiss) private var dismiss
+    @State private var includesDue = false
+    @State private var due = Date()
+    @State private var sending = false
+    @State private var confirmingRetry = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("发送到提醒事项").font(.title2.bold())
+                Spacer()
+                Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            Text(task.title).font(.headline)
+            if let list = reminders.handoffListLabel(for: task.id) {
+                Text("原清单：\(list)").font(.callout).foregroundStyle(.secondary)
+            }
+            if !reminders.authorized && reminders.handoffStatus(for: task.id) != .notSent {
+                MacReminderListPicker(reminders: reminders)
+            }
+            switch reminders.handoffStatus(for: task.id) {
+            case .sent:
+                Label("这项任务已发送", systemImage: "checkmark.circle")
+                Text("在 iPhone 的提醒事项里完成后，下次 Mac 读取到该状态时，会完成这里的任务。")
+                    .foregroundStyle(.secondary)
+            case .needsReview:
+                Text("发送结果待核实。请先查看原清单，再刷新关联状态。").foregroundStyle(.secondary)
+                HStack {
+                    Button("刷新状态") { Task { await reminders.refresh() } }
+                    if reminders.canRetryHandoff(for: task.id) {
+                        Button("核对后重新发送…") { confirmingRetry = true }
+                    }
+                }.disabled(reminders.busy || sending)
+            case .notSent:
+                Text("发送已保存的标题。你可以单独设置提醒事项的截止日。").foregroundStyle(.secondary)
+                MacReminderListPicker(reminders: reminders)
+                if reminders.authorized, reminders.selectedListID != nil {
+                    Toggle("设置提醒事项的截止日", isOn: $includesDue)
+                    if includesDue {
+                        DatePicker("截止日", selection: $due, displayedComponents: [.date])
+                    }
+                    Button("发送") {
+                        guard !sending, isCurrent() else { return }
+                        sending = true
+                        let day = includesDue ? Day(date: due, timeZone: .current) : nil
+                        Task {
+                            defer { sending = false }
+                            guard isCurrent() else { return }
+                            await reminders.sendTask(task.id, due: day)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(sending || reminders.busy || task.deletedAt != nil || task.isCompleted || !isCurrent())
+                }
+            }
+            if let message = reminders.message { Text(message).font(.callout).textSelection(.enabled) }
+        }
+        .padding(22).frame(minWidth: 420, idealWidth: 470)
+        .confirmationDialog("已在原清单里核实这条提醒仍未出现？", isPresented: $confirmingRetry) {
+            Button("重新发送到原清单") {
+                Task {
+                    guard !sending, isCurrent() else { return }
+                    sending = true
+                    defer { sending = false }
+                    await reminders.retryHandoff(task.id, due: nil)
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("请先等系统提醒事项完成同步。Let’s Do 会再检查一次原清单；如果原提醒延迟到达，仍可能出现两条。")
+        }
+        .task { await reminders.refresh() }
+    }
+}
 #endif

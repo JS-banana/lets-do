@@ -29,7 +29,12 @@ struct TodoApp: App {
         #endif
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && model.loaded {
-                Task { await model.checkAccountAndStorage() }
+                Task {
+                    await model.checkAccountAndStorage()
+                    #if os(macOS)
+                    await model.reminders.refreshIfConnected()
+                    #endif
+                }
             }
         }
         #if os(macOS)
