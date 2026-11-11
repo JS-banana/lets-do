@@ -39,6 +39,35 @@ final class TodayTasksTests: XCTestCase {
         XCTAssertEqual(TodayTasks([current], on: monday.adding(days: 7), timeZone: .gmt).earlier.map(\.id), [current.id])
     }
 
+    func testWidgetWeekLinksMatchTheirListsAcrossMondayAndManualRescheduling() throws {
+        let monday = try Day("2026-11-09")
+        let nextMonday = monday.adding(days: 7)
+        let missed = task("交报销单", .allDay(start: monday, endExclusive: monday.adding(days: 1)))
+        let pending = task("本周待安排", .week(start: monday))
+        let prior = task("上周待安排", .week(start: monday.adding(days: -7)))
+        let spanning = task("跨入下一周", .allDay(start: nextMonday.adding(days: -1), endExclusive: nextMonday.adding(days: 1)))
+        let finished = task("上周已完成", prior.schedule, done: true)
+        let items = [missed, pending, prior, spanning, finished, task("收集箱", .none), pending, prior]
+        let widget = try XCTUnwrap(WeekTaskOverview.make(today: monday.adding(days: 2), tasks: items, timeZone: .gmt))
+        XCTAssertTrue(widget.rows.contains { $0.id == missed.id && $0.day == monday })
+        let pendingList = WeekTaskList.pending.tasks(from: items, weekStart: monday, timeZone: .gmt)
+        XCTAssertEqual(pendingList.map(\.id), [pending.id])
+        XCTAssertEqual(pendingList.count, widget.pendingCount)
+        XCTAssertEqual(WeekTaskList.previousWeeks.tasks(from: items, weekStart: monday, timeZone: .gmt).map(\.id), [prior.id])
+
+        let old = WeekTaskList.previousWeeks.tasks(from: items, weekStart: nextMonday, timeZone: .gmt)
+        XCTAssertEqual(Set(old.map(\.id)), [missed.id, pending.id, prior.id])
+        XCTAssertEqual(old.count, 3)
+        XCTAssertEqual(old.first { $0.id == missed.id }?.schedule, missed.schedule)
+        let next = try XCTUnwrap(WeekTaskOverview.make(today: nextMonday, tasks: items, timeZone: .gmt))
+        XCTAssertEqual(next.rows.map(\.id), [spanning.id])
+
+        let moved = CalendarTask(id: missed.id, title: missed.title, schedule: .week(start: nextMonday), isCompleted: false)
+        let updated = items.filter { $0.id != missed.id } + [moved]
+        XCTAssertFalse(WeekTaskList.previousWeeks.tasks(from: updated, weekStart: nextMonday, timeZone: .gmt).contains { $0.id == missed.id })
+        XCTAssertEqual(WeekTaskList.pending.tasks(from: updated, weekStart: nextMonday, timeZone: .gmt).map(\.id), [missed.id])
+    }
+
     func testLocalMidnightAcrossDaylightSavingAndZones() throws {
         let zone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
         let day = try Day("2026-11-02")

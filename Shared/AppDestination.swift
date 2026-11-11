@@ -7,6 +7,7 @@ enum AppDestination: Equatable, Sendable {
     case inbox
     case task(UUID)
     case calendar(Day, CalendarPresentation)
+    case weekList(Day, WeekTaskList)
     case capture(TaskSchedule)
 
     static var scheme: String {
@@ -23,6 +24,9 @@ enum AppDestination: Equatable, Sendable {
         case .calendar(let day, let view):
             parts.host = "calendar"; parts.path = "/\(day.rawValue)"
             parts.queryItems = [URLQueryItem(name: "view", value: view.rawValue)]
+        case .weekList(let monday, let list):
+            parts.host = "calendar"; parts.path = "/\(monday.rawValue)"
+            parts.queryItems = [URLQueryItem(name: "view", value: list.rawValue)]
         case .capture(let schedule):
             parts.host = "capture"
             if case .week(let start) = schedule { parts.queryItems = [URLQueryItem(name: "week", value: start.rawValue)] }
@@ -58,9 +62,13 @@ enum AppDestination: Equatable, Sendable {
                   queries.allSatisfy({ $0.value != nil }),
                   let monthStart = try? Day(String(day.rawValue.prefix(7)) + "-01"),
                   monthStart.addingIfPossible(days: -6) != nil,
-                  monthStart.addingIfPossible(days: 42) != nil,
-                  let view = CalendarPresentation(rawValue: queries.first?.value ?? "week") else { return nil }
-            self = .calendar(day, view)
+                  monthStart.addingIfPossible(days: 42) != nil else { return nil }
+            let value = queries.first?.value ?? "week"
+            if let view = CalendarPresentation(rawValue: value) {
+                self = .calendar(day, view)
+            } else if let list = WeekTaskList(rawValue: value), day.weekStart == day {
+                self = .weekList(day, list)
+            } else { return nil }
         case "capture":
             guard path.isEmpty, queries.count <= 1 else { return nil }
             if let query = queries.first {
