@@ -22,6 +22,7 @@ struct TodoApp: App {
                 #endif
         }
         #if os(macOS)
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1160, height: 800)
         .handlesExternalEvents(matching: ["\(AppDestination.scheme)://task", "\(AppDestination.scheme)://calendar", "\(AppDestination.scheme)://open"])
         .commands { TaskCommands() }

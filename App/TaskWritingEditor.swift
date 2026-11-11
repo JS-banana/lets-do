@@ -56,15 +56,6 @@ struct TaskWritingEditor: View {
                     .frame(minHeight: minimumHeight)
                     .accessibilityIdentifier("taskWritingEditor")
                     .accessibilityLabel("任务编辑器；第一段为标题，换行后为正文")
-                if !content.hasText {
-                    Text("任务标题")
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 8)
-                        .padding(.leading, 2)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
             }
             .frame(minHeight: minimumHeight)
         }
@@ -1086,7 +1077,7 @@ private struct TaskWritingPlatformEditor: NSViewRepresentable {
         }
 
         private func titleFont() -> NSFont {
-            NSFont.systemFont(ofSize: 22, weight: .semibold)
+            NSFont.systemFont(ofSize: 18, weight: .semibold)
         }
 
         private func bodyFont() -> NSFont {
