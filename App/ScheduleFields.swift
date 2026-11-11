@@ -387,6 +387,11 @@ struct TaskDatePopover: View {
                 quickChoice(title: "明天", detail: AppStyle.weekdayLabel(tomorrow), identifier: "scheduleTomorrow") {
                     applyQuick(tomorrow)
                 }
+                if let monday = today.weekStart {
+                    quickChoice(title: "放入本周待安排", detail: "暂不选具体日期", identifier: "scheduleThisWeek") {
+                        applySchedule(.week(start: monday))
+                    }
+                }
                 quickChoice(title: "下周一", detail: AppStyle.dayLabel(nextWeek), identifier: "scheduleNextWeek") {
                     applyQuick(nextWeek)
                 }

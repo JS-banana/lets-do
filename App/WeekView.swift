@@ -17,8 +17,64 @@ struct WeekView: View {
     }
 
     var body: some View {
+        #if os(iOS)
+        phoneAgenda
+        #else
         taskBoard
+        #endif
     }
+
+    #if os(iOS)
+    private var phoneAgenda: some View {
+        let week = days
+        let dated = model.scheduled(on: selectedDay)
+        let pending = model.active.filter { !$0.isCompleted && $0.schedule == .week(start: week[0]) }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    CalendarDateButton(day: $selectedDay, title: AppStyle.dayLabel(selectedDay))
+                    Spacer()
+                    Button { if let day = selectedDay.addingIfPossible(days: -7) { selectedDay = day } }
+                        label: { Image(systemName: "chevron.left").frame(width: 36, height: 44) }.accessibilityLabel("上一周")
+                    Button("今天") { selectedDay = Day(date: Date(), timeZone: .current) }
+                    Button { if let day = selectedDay.addingIfPossible(days: 7) { selectedDay = day } }
+                        label: { Image(systemName: "chevron.right").frame(width: 36, height: 44) }.accessibilityLabel("下一周")
+                }
+                HStack(spacing: 0) {
+                    ForEach(week) { day in
+                        Button { selectedDay = day } label: {
+                            VStack(spacing: 4) {
+                                Text(String(AppStyle.weekdayLabel(day).suffix(1))).font(.caption)
+                                Text(String(Int(day.rawValue.suffix(2)) ?? 0)).font(.headline)
+                            }.frame(maxWidth: .infinity, minHeight: 48)
+                                .background(day == selectedDay ? AppStyle.accent.opacity(0.12) : .clear,
+                                            in: RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain).accessibilityLabel(AppStyle.dayLabel(day))
+                            .accessibilityAddTraits(day == selectedDay ? .isSelected : [])
+                    }
+                }
+                HStack {
+                    Text("当天任务").font(.headline)
+                    Spacer()
+                    Button("添加任务", systemImage: "plus") { create(selectedDay) }
+                }
+                if dated.isEmpty { Text("这一天没有安排").foregroundStyle(.secondary) }
+                ForEach(dated) { phoneRow($0) }
+                Divider()
+                HStack {
+                    Text("本周待安排").font(.headline)
+                    Spacer()
+                    Button("加入本周", systemImage: "plus") { createWeek?(week[0]) }
+                }
+                ForEach(pending) { phoneRow($0) }
+            }.padding()
+        }
+    }
+
+    private func phoneRow(_ task: TaskSnapshot) -> some View {
+        TaskAgendaRow(task: task, complete: { model.toggleCompletion(task) }, open: { model.selection = task.id })
+    }
+    #endif
 
     private var taskBoard: some View {
         let weekDays = days

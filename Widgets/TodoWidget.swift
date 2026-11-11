@@ -65,7 +65,7 @@ struct TodayTasksWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "TodoM0Tasks", provider: TaskProvider()) { TaskWidgetView(entry: $0) }
             .configurationDisplayName("今天的任务")
-            .description("查看今天的任务，完成一项，或快速记下新的想法。")
+            .description("查看今天和此前未完成的任务，直接勾选完成，或快速记到收集箱。")
             .contentMarginsDisabled()
             .supportedFamilies([.systemSmall, .systemMedium])
     }
@@ -75,7 +75,7 @@ struct WeekPlanWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "TodoM0Week", provider: TaskProvider()) { TaskWidgetView(entry: $0, mode: .week) }
             .configurationDisplayName("本周计划")
-            .description("查看今天与本周接下来的任务，点击日期查看当天任务。")
+            .description("查看周一至周日的安排和本周尚未完成的任务，点击日期打开当天清单。")
             .contentMarginsDisabled()
             #if os(macOS)
             .supportedFamilies([.systemMedium, .systemLarge, .systemExtraLarge])

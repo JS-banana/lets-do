@@ -43,6 +43,18 @@ struct LocalDraft: Codable, Equatable, Identifiable, Sendable {
     let updatedAt: Date
     var captureSchedule: TaskSchedule? = nil
     var formatting: NoteFormatting? = nil
+    var originalTitle: String? = nil
+
+    func editorTitle(current: String) -> (text: String, baseline: String, needsChoice: Bool) {
+        guard let originalTitle else {
+            // A legacy draft may contain either a deliberate rename or an old copy.
+            return (title, current, TaskStore.titleChange(title, from: current) != nil)
+        }
+        if TaskStore.titleChange(title, from: originalTitle) == nil {
+            return (current, current, false)
+        }
+        return (title, originalTitle, false)
+    }
 }
 
 struct TaskSnapshot: Codable, Equatable, Identifiable, Sendable {
@@ -76,11 +88,19 @@ struct TaskArchive: Codable, Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .millisecondsSince1970
-        return try encoder.encode(self)
+        let data = try encoder.encode(self)
+        try Self.checkSize(data)
+        return data
+    }
+
+    private static func checkSize(_ data: Data) throws {
+        guard data.count <= 20_000_000 else {
+            throw PrototypeError.invalid("JSON 备份超过 20 MB，无法导出或恢复。原库已保留。")
+        }
     }
 
     static func decode(_ data: Data) throws -> Self {
-        guard data.count <= 20_000_000 else { throw PrototypeError.invalid("M0 备份超过 20 MB，未导入。") }
+        try checkSize(data)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970
         let archive = try decoder.decode(Self.self, from: data)
@@ -411,6 +431,11 @@ final class TaskStore {
         return value
     }
 
+    nonisolated static func titleChange(_ title: String, from original: String) -> String? {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed == original.trimmingCharacters(in: .whitespacesAndNewlines) ? nil : trimmed
+    }
+
     init(directory: URL, cloudID: String? = nil, isExtension: Bool = false, session: StoreSession? = nil) throws {
         self.directory = directory
         self.isExtension = isExtension
@@ -709,9 +734,9 @@ final class TaskStore {
         }
     }
 
-    func updateContent(id: UUID, title: String, revisionID: UUID, body: String,
+    func updateContent(id: UUID, title: String?, revisionID: UUID, body: String,
                        formatting: NoteFormatting?, parentIDs: [UUID]) throws {
-        let title = try Self.validTitle(title)
+        let title = try title.map(Self.validTitle)
         guard body.utf8.count <= 1_000_000 else { throw PrototypeError.invalid("正文超过 1 MB，当前输入已保留。") }
         let formatting = try formatting?.validated(for: body)
         try write("task.edit", id: id) { context in
@@ -727,9 +752,11 @@ final class TaskStore {
             // merely because the user changed the title while reading an older version.
             let noteChanged = baseline.map { $0.body != body || $0.formatting != formatting }
                 ?? (!body.isEmpty || formatting != nil || !parents.isEmpty)
-            for task in tasks where task.value(forKey: "title") as? String != title {
-                task.setValue(title, forKey: "title")
-                task.setValue(Date(), forKey: "updatedAt")
+            if let title {
+                for task in tasks where task.value(forKey: "title") as? String != title {
+                    task.setValue(title, forKey: "title")
+                    task.setValue(Date(), forKey: "updatedAt")
+                }
             }
             if noteChanged {
                 try appendNote(in: context, tasks: tasks, taskID: id, id: revisionID,
@@ -812,6 +839,7 @@ final class TaskStore {
             revisions[id] = value
         }
         try NoteRevision.validateGraph(Array(revisions.values))
+        let revisionsByTask = Dictionary(grouping: revisions.values, by: \.taskID)
         let objects = try context.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskItem"))
         var groups: [UUID: [NSManagedObject]] = [:]
         for object in objects {
@@ -837,7 +865,7 @@ final class TaskStore {
                                         completedAt: object.value(forKey: "completedAt") as? Date,
                                         deletedAt: group.compactMap { $0.value(forKey: "deletedAt") as? Date }.min(),
                                         schedule: schedule, currentRevisionID: object.value(forKey: "currentRevisionID") as? UUID,
-                                        revisions: revisions.values.filter { $0.taskID == id }.sorted { $0.id.uuidString < $1.id.uuidString }))
+                                        revisions: (revisionsByTask[id] ?? []).sorted { $0.id.uuidString < $1.id.uuidString }))
         }
         return results.sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
     }
