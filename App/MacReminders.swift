@@ -155,6 +155,8 @@ private struct ReminderExport: Codable {
     var externalID: String?
     var status = MacReminderHandoffStatus.needsReview
     var completionApplied = false
+    var pendingCompletionActionID: UUID?
+    // Legacy receipts could not distinguish a failed write from a later user edit.
     var pendingCompletionBaseline: Date?
 }
 
@@ -494,25 +496,38 @@ final class MacReminders: ObservableObject {
             handoffStates[id] = .needsReview
             return
         }
+        guard link.completionApplied || link.pendingCompletionBaseline == nil || link.pendingCompletionActionID != nil else {
+            try ReminderLinks.update(in: store.directory) { links in
+                try links.updateExport(id) { $0.status = .needsReview }
+            }
+            handoffStates[id] = .needsReview
+            handoffs[id]?.status = .needsReview
+            message = "旧版完成回收曾中断，无法确认是否已执行。请在本机核对任务完成状态。"
+            return
+        }
         if link.externalID == nil || link.status != .sent {
             try confirm(id, externalID: item.externalID, directory: store.directory)
         }
         handoffStates[id] = .sent
         guard item.completed, !link.completionApplied else { return }
         let task = try store.snapshots().first { $0.id == id }
-        if let task, task.deletedAt == nil, !task.isCompleted {
-            // Record the exact local baseline before changing the task. After an interrupted
-            // acknowledgement, don't replay a completion against a task the user has since reopened.
-            let baseline = link.pendingCompletionBaseline ?? task.updatedAt
-            if link.pendingCompletionBaseline == nil {
+        if let task, task.deletedAt == nil {
+            // Reserve a stable action before writing. TaskStore records the action in the
+            // same transaction as completion, so a retry never overwrites a later reopening.
+            let actionID = link.pendingCompletionActionID ?? UUID()
+            if link.pendingCompletionActionID == nil {
                 try ReminderLinks.update(in: store.directory) { links in
-                    try links.updateExport(id) { $0.pendingCompletionBaseline = baseline }
+                    try links.updateExport(id) { $0.pendingCompletionActionID = actionID }
                 }
             }
-            if task.updatedAt == baseline { try store.setCompleted(id: id, completed: true) }
+            try store.setCompleted(id: id, completed: true, actionID: actionID)
         }
         try ReminderLinks.update(in: store.directory) { links in
-            try links.updateExport(id) { $0.completionApplied = true; $0.pendingCompletionBaseline = nil }
+            try links.updateExport(id) {
+                $0.completionApplied = true
+                $0.pendingCompletionActionID = nil
+                $0.pendingCompletionBaseline = nil
+            }
         }
     }
 

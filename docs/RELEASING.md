@@ -2,7 +2,7 @@
 
 ## 分发包与 CI
 
-Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、月 Widget，支持 macOS 14 及以上的 Apple 芯片与 Intel Mac。主应用非沙盒，Widget 保留沙盒；两者分别采用 ad hoc 完整性签名，无 Apple 开发者证书、私钥、团队或 App Group，也不连接 iCloud。存储与升级约束见 [Mac 分发说明](MAC-DISTRIBUTION.md)。
+Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、月 Widget，支持 macOS 14 及以上的 Apple 芯片与 Intel Mac。主应用非沙盒，Widget 保留沙盒；两者分别采用 ad hoc 完整性签名，无 Apple 开发者证书、私钥、团队或 App Group，任务库不启用 CloudKit 镜像。系统提醒事项的互操作与授权单独按[提醒事项方案](MAC-REMINDERS.md)验证。存储与升级约束见 [Mac 分发说明](MAC-DISTRIBUTION.md)。
 
 应用未经过 Apple 公证。首次打开可能需要在「系统设置 → 隐私与安全性」中单独允许该应用；不要求使用者提供开发者账号或关闭系统全局保护。
 

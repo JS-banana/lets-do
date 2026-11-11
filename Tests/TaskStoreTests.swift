@@ -640,6 +640,61 @@ final class TaskStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testCompletionHistoryQueryDistinguishesMissingAndCommittedActions() throws {
+        try withStore { store in
+            let id = UUID()
+            try store.createTask(id: id, title: "核对真实历史查询结果")
+            let context = try XCTUnwrap(store.container?.viewContext)
+            func history(for actionID: UUID) throws -> NSPersistentHistoryResult {
+                let transactions = NSFetchRequest<NSFetchRequestResult>()
+                transactions.entity = try XCTUnwrap(NSPersistentHistoryTransaction.entityDescription(with: context))
+                transactions.predicate = NSPredicate(format: "author IN %@", ["app:\(actionID.uuidString)", "widget:\(actionID.uuidString)"])
+                transactions.fetchLimit = 1
+                let request = NSPersistentHistoryChangeRequest.fetchHistory(after: nil as NSPersistentHistoryToken?)
+                request.fetchRequest = transactions
+                request.resultType = .transactionsOnly
+                return try XCTUnwrap(context.execute(request) as? NSPersistentHistoryResult)
+            }
+            let missing = try history(for: UUID())
+            XCTAssertEqual(missing.resultType, .transactionsOnly)
+            XCTAssertTrue(try XCTUnwrap(missing.result as? [NSPersistentHistoryTransaction]).isEmpty)
+            XCTContext.runActivity(named: "Core Data no-match history result") { activity in
+                let evidence = XCTAttachment(string: "resultType: \(missing.resultType.rawValue); payload: \(String(reflecting: missing.result))")
+                evidence.lifetime = .keepAlways
+                activity.add(evidence)
+            }
+            let actionID = try store.setCompleted(id: id, completed: true)
+            let committed = try history(for: actionID)
+            let transactions = try XCTUnwrap(committed.result as? [NSPersistentHistoryTransaction])
+            XCTAssertEqual(committed.resultType, .transactionsOnly)
+            XCTAssertEqual(transactions.count, 1)
+            XCTAssertEqual(transactions.first?.author, "app:\(actionID.uuidString)")
+        }
+    }
+
+    @MainActor
+    func testCompletionActionIsIdempotentAcrossWritersHistoryConsumptionAndRestart() throws {
+        try withStore { app in
+            let id = UUID(), actionID = UUID()
+            try app.createTask(id: id, title: "完成凭据与任务一同提交")
+            try app.setCompleted(id: id, completed: true, actionID: actionID)
+            XCTAssertTrue(try XCTUnwrap(app.snapshots().first).isCompleted)
+            try app.consumeHistory()
+            let widget = try TaskStore(directory: app.directory, isExtension: true)
+            try widget.setCompleted(id: id, completed: false)
+            try widget.setCompleted(id: id, completed: true, actionID: actionID)
+            XCTAssertFalse(try XCTUnwrap(widget.snapshots().first).isCompleted)
+            try widget.consumeHistory()
+            try widget.close()
+            try app.close()
+            let reopened = try TaskStore(directory: app.directory)
+            defer { try? reopened.close() }
+            try reopened.setCompleted(id: id, completed: true, actionID: actionID)
+            XCTAssertFalse(try XCTUnwrap(reopened.snapshots().first).isCompleted)
+        }
+    }
+
+    @MainActor
     func testSharedWriterLockRejectsContentionWithoutPartialTask() throws {
         try withStore { store in
             let descriptor = open(store.directory.appendingPathComponent("write.lock").path, O_CREAT | O_RDWR, 0o600)
@@ -977,13 +1032,16 @@ final class TaskStoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: base) }
         let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
         let original = try TaskStore(directory: source)
-        let id = UUID(), parent = UUID(), child = UUID()
+        let id = UUID(), parent = UUID(), child = UUID(), completionTaskID = UUID(), completionActionID = UUID()
         try original.createTask(id: id, title: "完整升级")
         try original.saveNoteRevision(taskID: id, id: parent, body: "父版本", parentIDs: [])
         let format = NoteFormatting(bold: [.init(location: 0, length: 3)])
         try original.saveNoteRevision(taskID: id, id: child, body: "子版本", parentIDs: [parent], formatting: format)
         try original.setCompleted(id: id, completed: true)
         try original.moveToTrash(id: id)
+        try original.createTask(id: completionTaskID, title: "升级前已重开的任务")
+        try original.setCompleted(id: completionTaskID, completed: true, actionID: completionActionID)
+        try original.setCompleted(id: completionTaskID, completed: false)
         let capture = LocalDraft(formatVersion: 1, id: UUID(), taskID: UUID(), kind: .capture,
                                  title: "收集草稿", body: "尚未创建任务", parentIDs: [], updatedAt: Date())
         let editor = LocalDraft(formatVersion: 1, id: UUID(), taskID: id, kind: .editor,
@@ -993,7 +1051,9 @@ final class TaskStoreTests: XCTestCase {
         try links.write(to: source.appendingPathComponent("reminders-links.json"))
         try original.consumeHistory()
         let snapshots = try original.snapshots(), drafts = try original.drafts()
-        let recordKey = try XCTUnwrap(original.container?.viewContext.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskItem")).first?.value(forKey: "recordKey") as? String)
+        let physicalTask = NSFetchRequest<NSManagedObject>(entityName: "TaskItem")
+        physicalTask.predicate = NSPredicate(format: "id == %@", id as NSUUID)
+        let recordKey = try XCTUnwrap(original.container?.viewContext.fetch(physicalTask).first?.value(forKey: "recordKey") as? String)
         let history = NSPersistentHistoryChangeRequest.fetchHistory(after: nil as NSPersistentHistoryToken?)
         let originalTransactions = try XCTUnwrap(original.container?.viewContext.execute(history) as? NSPersistentHistoryResult).result as? [NSPersistentHistoryTransaction]
         XCTAssertFalse(try XCTUnwrap(originalTransactions).isEmpty)
@@ -1010,9 +1070,13 @@ final class TaskStoreTests: XCTestCase {
         XCTAssertEqual(try upgraded.snapshots(), snapshots)
         XCTAssertEqual(try upgraded.drafts(), drafts)
         XCTAssertEqual(try Data(contentsOf: target.appendingPathComponent("reminders-links.json")), links)
-        XCTAssertEqual(try upgraded.container?.viewContext.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskItem")).first?.value(forKey: "recordKey") as? String, recordKey)
+        let upgradedPhysicalTask = NSFetchRequest<NSManagedObject>(entityName: "TaskItem")
+        upgradedPhysicalTask.predicate = NSPredicate(format: "id == %@", id as NSUUID)
+        XCTAssertEqual(try upgraded.container?.viewContext.fetch(upgradedPhysicalTask).first?.value(forKey: "recordKey") as? String, recordKey)
         let copiedTransactions = try XCTUnwrap(upgraded.container?.viewContext.execute(history) as? NSPersistentHistoryResult).result as? [NSPersistentHistoryTransaction]
         XCTAssertEqual(copiedTransactions?.count, originalTransactions?.count)
+        try upgraded.setCompleted(id: completionTaskID, completed: true, actionID: completionActionID)
+        XCTAssertEqual(try upgraded.snapshots(), snapshots)
         try upgraded.close()
         try LocalLibraryUpgrade.prepare(source: source, target: target)
         XCTAssertEqual(try JSONDecoder().decode(LocalLibraryUpgrade.Receipt.self, from: Data(contentsOf: receiptURL)), receipt)
