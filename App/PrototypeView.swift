@@ -657,7 +657,9 @@ struct PrototypeView: View {
 
     @ViewBuilder
     private func planningActions(for task: TaskSnapshot, today: Day) -> some View {
-        Button("安排到今天") { model.move(id: task.id, to: today) }
+        Button("安排到今天") {
+            model.perform { try $0.scheduleTask(id: task.id, schedule: .singleDay(today)) }
+        }
         if let monday = today.weekStart, task.schedule != .week(start: monday) {
             Button("放入本周待安排") { model.perform { try $0.scheduleTask(id: task.id, schedule: .week(start: monday)) } }
         }
@@ -1126,6 +1128,9 @@ struct TaskDetail: View {
     @State private var initialized = false
     @State private var showingSchedule = false
     @State private var showingHistory = false
+    #if os(macOS)
+    @State private var showingReminderHandoff = false
+    #endif
     @State private var needsDraftTitleChoice = false
     @State private var showingDraftTitleChoice = false
     @State private var draftStatus = ""
@@ -1229,6 +1234,15 @@ struct TaskDetail: View {
                             guard hasCurrentStore else { return }
                             model.toggleCompletion(task)
                         }.accessibilityIdentifier("detailCompletion")
+                        #if os(macOS)
+                        if !task.isCompleted {
+                            Button("发送到提醒事项…") {
+                                TaskWritingEditor.finishEditing()
+                                guard persistEditorDraft(), hasCurrentStore else { return }
+                                showingReminderHandoff = true
+                            }
+                        }
+                        #endif
                     }
                 } label: {
                     Image(systemName: "ellipsis").foregroundStyle(.secondary).frame(width: 28, height: 28)
@@ -1252,7 +1266,10 @@ struct TaskDetail: View {
         }
         .background(AppStyle.canvas(colorScheme))
         #if os(macOS)
-        .background(InspectorDismissal(handlesEscape: !showingSchedule && !showingHistory) { closeDetail() })
+        .background(InspectorDismissal(handlesEscape: !showingSchedule && !showingHistory && !showingReminderHandoff) { closeDetail() })
+        .sheet(isPresented: $showingReminderHandoff) {
+            MacReminderHandoffView(reminders: model.reminders, task: task, isCurrent: { hasCurrentStore })
+        }
         #endif
         .onAppear {
             guard !initialized else { return }

@@ -259,6 +259,10 @@ public enum TaskSchedule: Codable, Equatable, Sendable {
         }
     }
 
+    public static func singleDay(_ day: Day) -> Self {
+        .allDay(start: day, endExclusive: day.addingIfPossible(days: 1) ?? day)
+    }
+
     /// Moves the schedule by the difference between the source day displayed
     /// in `displayTimeZone` and `day`.  A timed schedule keeps its original
     /// time zone's local clock where possible and keeps its elapsed duration.

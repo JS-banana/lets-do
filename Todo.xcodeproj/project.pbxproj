@@ -429,7 +429,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				INFOPLIST_FILE = "Config/App-Info.plist";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许访问提醒事项，以便从你选择的清单导入待办。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许从你选择的清单导入待办、发送指定任务，并读取已发送事项的完成状态。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -471,7 +471,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				INFOPLIST_FILE = "Config/App-Info.plist";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许访问提醒事项，以便从你选择的清单导入待办。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许从你选择的清单导入待办、发送指定任务，并读取已发送事项的完成状态。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -665,7 +665,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				INFOPLIST_FILE = "Config/App-Info.plist";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许访问提醒事项，以便从你选择的清单导入待办。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许从你选择的清单导入待办、发送指定任务，并读取已发送事项的完成状态。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -806,7 +806,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/App-Info.plist";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许访问提醒事项，以便从你选择的清单导入待办。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许从你选择的清单导入待办、发送指定任务，并读取已发送事项的完成状态。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

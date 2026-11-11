@@ -603,7 +603,7 @@ struct TaskDatePopover: View {
     }
 
     private func applyQuick(_ day: Day) {
-        applySchedule(.allDay(start: day, endExclusive: day.adding(days: 1)))
+        applySchedule(.singleDay(day))
     }
 
     private func applySchedule(_ value: TaskSchedule) {

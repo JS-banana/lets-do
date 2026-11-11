@@ -4,7 +4,7 @@ import Darwin
 @preconcurrency import EventKit
 import Foundation
 
-struct MacReminderScope: Codable, Equatable, Sendable {
+struct MacReminderScope: Codable, Hashable, Sendable {
     let sourceID: String
     let listID: String
 }
@@ -24,13 +24,14 @@ struct MacReminderCandidate: Identifiable, Equatable, Sendable {
     let notes: String
     let completed: Bool
     var dueLabel: String? = nil
+    var marker: URL? = nil
 
     static func dueLabel(for components: DateComponents?) -> String? {
         guard let components, let year = components.year, let month = components.month, let day = components.day else { return nil }
         let date = String(format: "%04d-%02d-%02d", year, month, day)
         guard let hour = components.hour else { return date }
         let clock = String(format: "%02d:%02d", hour, components.minute ?? 0)
-        let zone = components.timeZone ?? components.calendar?.timeZone
+        let zone = components.timeZone
         return [date, clock, zone?.identifier].compactMap { $0 }.joined(separator: " ")
     }
 }
@@ -41,8 +42,9 @@ protocol MacReminderSource {
     var canRequestPermission: Bool { get }
     func requestAccess() async throws
     func lists() -> [MacReminderList]
-    func reminders(in scope: MacReminderScope) async throws -> [MacReminderCandidate]
+    func reminders(in scope: MacReminderScope, includingCompleted: Bool) async throws -> [MacReminderCandidate]
     func current(_ id: String) -> MacReminderCandidate?
+    func create(title: String, due: Day?, marker: URL, in scope: MacReminderScope) throws -> MacReminderCandidate
 }
 
 @MainActor
@@ -61,24 +63,27 @@ private final class SystemReminderSource: MacReminderSource {
     }
 
     func lists() -> [MacReminderList] {
-        events.calendars(for: .reminder).filter(\.allowsContentModifications).map {
-            MacReminderList(scope: Self.scope($0), title: $0.title, sourceTitle: $0.source.title)
+        events.calendars(for: .reminder).compactMap { calendar -> MacReminderList? in
+            guard calendar.allowsContentModifications, let scope = Self.scope(calendar),
+                  let source = calendar.source else { return nil }
+            return MacReminderList(scope: scope, title: calendar.title, sourceTitle: source.title)
         }.sorted {
             ($0.sourceTitle, $0.title, $0.id) < ($1.sourceTitle, $1.title, $1.id)
         }
     }
 
-    private nonisolated static func scope(_ calendar: EKCalendar) -> MacReminderScope {
-        MacReminderScope(sourceID: calendar.source.sourceIdentifier, listID: calendar.calendarIdentifier)
+    private nonisolated static func scope(_ calendar: EKCalendar) -> MacReminderScope? {
+        guard let source = calendar.source else { return nil }
+        return MacReminderScope(sourceID: source.sourceIdentifier, listID: calendar.calendarIdentifier)
     }
 
     private nonisolated static func candidate(_ reminder: EKReminder) -> MacReminderCandidate? {
-        guard let calendar = reminder.calendar else { return nil }
+        guard let calendar = reminder.calendar, let listScope = scope(calendar) else { return nil }
         return MacReminderCandidate(id: reminder.calendarItemIdentifier,
                                     externalID: reminder.calendarItemExternalIdentifier ?? "",
-                                    scope: scope(calendar), title: reminder.title ?? "",
+                                    scope: listScope, title: reminder.title ?? "",
                                     notes: reminder.notes ?? "", completed: reminder.isCompleted,
-                                    dueLabel: MacReminderCandidate.dueLabel(for: reminder.dueDateComponents))
+                                    dueLabel: MacReminderCandidate.dueLabel(for: reminder.dueDateComponents), marker: reminder.url)
     }
 
     func current(_ id: String) -> MacReminderCandidate? {
@@ -86,12 +91,36 @@ private final class SystemReminderSource: MacReminderSource {
         return Self.candidate(reminder)
     }
 
-    func reminders(in scope: MacReminderScope) async throws -> [MacReminderCandidate] {
+    private func writableCalendar(_ scope: MacReminderScope) throws -> EKCalendar {
         guard authorized, let list = events.calendar(withIdentifier: scope.listID),
               list.allowsContentModifications, Self.scope(list) == scope else {
             throw PrototypeError.unavailable("提醒事项清单不可用，请重新选择。")
         }
-        let predicate = events.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: [list])
+        return list
+    }
+
+    func create(title: String, due: Day?, marker: URL, in scope: MacReminderScope) throws -> MacReminderCandidate {
+        let list = try writableCalendar(scope)
+        let reminder = EKReminder(eventStore: events)
+        reminder.calendar = list
+        reminder.title = title
+        reminder.url = marker
+        if let due {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = .gmt
+            var components = calendar.dateComponents([.year, .month, .day], from: due.date(in: .gmt))
+            components.calendar = calendar
+            reminder.dueDateComponents = components
+        }
+        try events.save(reminder, commit: true)
+        guard let saved = Self.candidate(reminder) else { throw PrototypeError.unavailable("发送状态待核对。") }
+        return saved
+    }
+
+    func reminders(in scope: MacReminderScope, includingCompleted: Bool) async throws -> [MacReminderCandidate] {
+        let list = try writableCalendar(scope)
+        let predicate = includingCompleted ? events.predicateForReminders(in: [list]) :
+            events.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: [list])
         return try await withCheckedThrowingContinuation { continuation in
             events.fetchReminders(matching: predicate) { @Sendable reminders in
                 guard let reminders else {
@@ -115,11 +144,36 @@ private struct ReminderImport: Codable {
     }
 }
 
+enum MacReminderHandoffStatus: String, Codable {
+    case notSent, sent, needsReview
+}
+
+private struct ReminderExport: Codable {
+    let scope: MacReminderScope
+    let marker: URL
+    let due: Day?
+    var externalID: String?
+    var status = MacReminderHandoffStatus.needsReview
+    var completionApplied = false
+    var pendingCompletionActionID: UUID?
+    // Legacy receipts could not distinguish a failed write from a later user edit.
+    var pendingCompletionBaseline: Date?
+}
+
 // This file contains only associations and the chosen list, never task contents.
 // Reserve the task UUID before committing to Core Data so a retry after a crash uses the same UUID.
 private struct ReminderLinks: Codable {
     var selected: MacReminderScope?
     var imports: [ReminderImport] = []
+    // Optional on disk because the first import-only version had no exports.
+    var exports: [UUID: ReminderExport]?
+
+    mutating func updateExport(_ taskID: UUID, _ body: (inout ReminderExport) -> Void) throws {
+        guard var link = exports?[taskID] else { throw PrototypeError.unavailable("提醒事项关联不可用。") }
+        body(&link)
+        exports?[taskID] = link
+    }
+
 
     static func read(from directory: URL) throws -> Self {
         let url = directory.appendingPathComponent("reminders-links.json")
@@ -147,6 +201,9 @@ final class MacReminders: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var message: String?
 
+    @Published private var handoffStates: [UUID: MacReminderHandoffStatus] = [:]
+    private var handoffs: [UUID: ReminderExport] = [:]
+    private var refreshQueued = false
     private let source: any MacReminderSource
     private weak var store: TaskStore?
     private var generation = UUID()
@@ -163,6 +220,9 @@ final class MacReminders: ObservableObject {
         guard store !== newStore || newStore == nil else { return }
         generation = UUID()
         store = newStore
+        handoffStates = [:]
+        handoffs = [:]
+        refreshQueued = false
         lists = []
         candidates = []
         selectedListID = nil
@@ -170,7 +230,11 @@ final class MacReminders: ObservableObject {
         message = nil
         updateAuthorization()
         guard let newStore else { return }
-        do { selectedListID = try ReminderLinks.read(from: newStore.directory).selected?.listID }
+        do {
+            let links = try ReminderLinks.read(from: newStore.directory)
+            selectedListID = links.selected?.listID
+            applyHandoffState(links)
+        }
         catch { message = error.localizedDescription }
     }
 
@@ -183,8 +247,9 @@ final class MacReminders: ObservableObject {
         do {
             try await source.requestAccess()
             guard generation == token else { return }
+            busy = false
             await refresh()
-            if !authorized { message = "未获得提醒事项权限，可在系统设置的隐私与安全性中授权。" }
+            if self.store != nil && !authorized { message = "未获得提醒事项权限，可在系统设置的隐私与安全性中授权。" }
         } catch {
             guard generation == token else { return }
             busy = false
@@ -194,7 +259,7 @@ final class MacReminders: ObservableObject {
     }
 
     func selectList(_ id: String?) async {
-        guard let store, store.container != nil else { return }
+        guard !busy, let store, store.container != nil else { return }
         let selected = id.flatMap { wanted in lists.first { $0.id == wanted } }
         guard id == nil || (source.authorized && selected != nil && source.lists().contains(where: { $0.scope == selected?.scope })) else {
             await refresh()
@@ -206,11 +271,55 @@ final class MacReminders: ObservableObject {
         } catch { message = error.localizedDescription }
     }
 
+    func handoffStatus(for id: UUID) -> MacReminderHandoffStatus { handoffStates[id] ?? .notSent }
+
+    private func applyHandoffState(_ links: ReminderLinks) {
+        let exports = links.exports ?? [:]
+        handoffStates = exports.mapValues(\.status)
+        handoffs = exports
+    }
+
+    func handoffListLabel(for id: UUID) -> String? {
+        guard let scope = handoffs[id]?.scope, let list = lists.first(where: { $0.scope == scope }) else { return nil }
+        return "\(list.sourceTitle) · \(list.title)"
+    }
+
+    func canRetryHandoff(for id: UUID) -> Bool {
+        guard let link = handoffs[id], link.externalID == nil else { return false }
+        return authorized && lists.contains { $0.scope == link.scope }
+    }
+
+    func refreshIfConnected() async {
+        guard let store, store.container != nil else { return }
+        do {
+            let links = try ReminderLinks.read(from: store.directory)
+            guard links.selected != nil || links.exports?.isEmpty == false else { return }
+            await refresh()
+        } catch { message = error.localizedDescription }
+    }
+
+    private func finish(_ token: UUID) {
+        guard generation == token else { return }
+        busy = false
+        if refreshQueued {
+            refreshQueued = false
+            Task { @MainActor [weak self] in
+                guard let self, self.generation == token else { return }
+                await self.refreshIfConnected()
+            }
+        }
+    }
+
+    private func isCurrent(_ token: UUID, store: TaskStore) -> Bool {
+        generation == token && self.store === store && store.container != nil
+    }
+
     func refresh() async {
+        guard !busy else { refreshQueued = true; return }
         let token = UUID()
         generation = token
         busy = true
-        defer { if generation == token { busy = false } }
+        defer { finish(token) }
         candidates = []
         message = nil
         updateAuthorization()
@@ -222,36 +331,203 @@ final class MacReminders: ObservableObject {
         do {
             lists = source.lists()
             let links = try ReminderLinks.read(from: store.directory)
-            guard let scope = links.selected else { selectedListID = nil; return }
-            guard lists.contains(where: { $0.scope == scope }) else {
-                selectedListID = nil
-                message = "原清单已不可用，请重新选择。"
-                return
+            let exports = links.exports ?? [:]
+            applyHandoffState(links)
+            selectedListID = lists.first { $0.scope == links.selected }?.id
+            if links.selected != nil && selectedListID == nil { message = "原清单已不可用，请重新选择。" }
+            var scopes = Set(exports.values.map(\.scope))
+            if let selected = links.selected { scopes.insert(selected) }
+            for scope in scopes {
+                guard isCurrent(token, store: store) else { return }
+                let linked = exports.filter { $0.value.scope == scope }
+                guard lists.contains(where: { $0.scope == scope }) else {
+                    for id in linked.keys { handoffStates[id] = .needsReview }
+                    continue
+                }
+                do {
+                    let items = try await source.reminders(in: scope, includingCompleted: !linked.isEmpty)
+                    guard isCurrent(token, store: store) else { return }
+                    guard source.authorized, source.lists().contains(where: { $0.scope == scope }) else {
+                        updateAuthorization()
+                        lists = authorized ? source.lists() : []
+                        if selectedListID == scope.listID || !authorized { candidates = []; selectedListID = nil }
+                        for id in linked.keys { handoffStates[id] = .needsReview }
+                        throw PrototypeError.unavailable("清单或授权已变化，请重新检查。")
+                    }
+                    let scoped = items.filter { $0.scope == scope }
+                    let refreshed = try ReminderLinks.read(from: store.directory)
+                    if refreshed.selected == scope { updateCandidates(scoped, links: refreshed) }
+                    guard !linked.isEmpty else { continue }
+                    let handoffLock = try StoreFileLock(url: store.directory.appendingPathComponent("reminders-handoff.lock"), mode: LOCK_EX)
+                    defer { withExtendedLifetime(handoffLock) {} }
+                    let byMarker = Dictionary(grouping: scoped.filter { $0.marker != nil }, by: \.marker)
+                    for (id, link) in linked {
+                        try reconcile(id, link: link, matches: byMarker[link.marker] ?? [], store: store)
+                    }
+                } catch {
+                    guard isCurrent(token, store: store) else { return }
+                    message = error.localizedDescription
+                }
             }
-            selectedListID = scope.listID
-            let items = try await source.reminders(in: scope)
-            guard generation == token, self.store === store, store.container != nil else { return }
+        } catch { message = error.localizedDescription }
+    }
+
+    private func updateCandidates(_ items: [MacReminderCandidate], links: ReminderLinks) {
+        let exportedIDs = Set((links.exports ?? [:]).values.filter { $0.scope == links.selected }.compactMap(\.externalID))
+        let scoped = items.filter { item in
+            guard !item.completed, !exportedIDs.contains(item.externalID) else { return false }
+            if let marker = item.marker, case .task? = AppDestination(url: marker) { return false }
+            return true
+        }
+        let groups = Dictionary(grouping: scoped, by: \.externalID)
+        candidates = scoped.filter { item in
+            !item.externalID.isEmpty && groups[item.externalID]?.count == 1 &&
+                !links.imports.contains { $0.committed && $0.matches(item) }
+        }.sorted { ($0.title, $0.id) < ($1.title, $1.id) }
+        if groups.contains(where: { $0.key.isEmpty || $0.value.count > 1 }) {
+            message = "有些提醒事项缺少唯一标识，已暂缓导入。"
+        }
+    }
+
+    func sendTask(_ id: UUID, due: Day?) async {
+        await send(id, due: due, retryConfirmedByUser: false)
+    }
+
+    // Call only after the user explicitly checks the original list and confirms retrying.
+    func retryHandoff(_ id: UUID, due: Day?) async {
+        await send(id, due: due, retryConfirmedByUser: true)
+    }
+
+    private func send(_ id: UUID, due: Day?, retryConfirmedByUser: Bool) async {
+        guard !busy, let store, store.container != nil, source.authorized else {
+            message = "请先授权并选择可写清单。"
+            return
+        }
+        let token = UUID()
+        generation = token
+        busy = true
+        defer { finish(token) }
+        do {
+            // Multiple host launches must not both retry the same unconfirmed system write.
+            let lock = try StoreFileLock(url: store.directory.appendingPathComponent("reminders-handoff.lock"), mode: LOCK_EX)
+            defer { withExtendedLifetime(lock) {} }
+            let initial = try ReminderLinks.read(from: store.directory)
+            let previous = initial.exports?[id]
+            let reservation: ReminderExport
+            if retryConfirmedByUser {
+                guard let previous, previous.externalID == nil else {
+                    throw PrototypeError.unavailable("仅可重试尚未确认的发送。")
+                }
+                reservation = previous
+            } else {
+                guard previous == nil else { throw PrototypeError.unavailable("此任务已有发送记录，请刷新核对。") }
+                guard let selected = initial.selected else { throw PrototypeError.unavailable("请选择可写的提醒事项清单。") }
+                reservation = ReminderExport(scope: selected, marker: AppDestination.task(id).url, due: due)
+            }
+            let scope = reservation.scope
+            guard source.lists().contains(where: { $0.scope == scope }) else {
+                throw PrototypeError.unavailable("原清单当前不可写，请检查账户和清单。")
+            }
+            let existing = try await source.reminders(in: scope, includingCompleted: true)
+            guard isCurrent(token, store: store) else { return }
             guard source.authorized, source.lists().contains(where: { $0.scope == scope }) else {
-                updateAuthorization()
-                lists = authorized ? source.lists() : []
-                selectedListID = nil
-                message = "清单或授权已变化，请重新检查。"
+                throw PrototypeError.unavailable("清单或授权已变化。")
+            }
+            let matches = existing.filter { $0.scope == scope && $0.marker == reservation.marker }
+            if !matches.isEmpty {
+                guard retryConfirmedByUser, matches.count == 1 else {
+                    throw PrototypeError.unavailable("清单中已有相同的任务链接，请核对已有提醒。")
+                }
+                try reconcile(id, link: reservation, matches: matches, store: store)
+                message = handoffStatus(for: id) == .sent ? "已找到原提醒。" : "原提醒的身份仍待核对。"
                 return
             }
-            let current = try ReminderLinks.read(from: store.directory)
-            guard current.selected == scope else { selectedListID = nil; return }
-            let scoped = items.filter { $0.scope == scope && !$0.completed }
-            let groups = Dictionary(grouping: scoped, by: \.externalID)
-            candidates = scoped.filter { item in
-                !item.externalID.isEmpty && groups[item.externalID]?.count == 1 &&
-                    !current.imports.contains { $0.committed && $0.matches(item) }
-            }.sorted { ($0.title, $0.id) < ($1.title, $1.id) }
-            if groups.contains(where: { $0.key.isEmpty || $0.value.count > 1 }) {
-                message = "有些提醒事项缺少唯一标识，已暂缓导入。"
+            guard let task = try store.snapshots().first(where: { $0.id == id }),
+                  task.deletedAt == nil, !task.isCompleted else {
+                throw PrototypeError.unavailable("只能发送当前库中未完成的任务。")
             }
+            // Reserve before calling EventKit. An ordinary retry never creates a second reminder.
+            try ReminderLinks.update(in: store.directory) { links in
+                if retryConfirmedByUser {
+                    guard let pending = links.exports?[id], pending.externalID == nil, pending.scope == scope,
+                          pending.marker == reservation.marker else { throw PrototypeError.unavailable("发送状态已变化。") }
+                } else {
+                    guard links.selected == scope, links.exports?[id] == nil else {
+                        throw PrototypeError.unavailable("清单或发送状态已变化，请刷新。")
+                    }
+                    if links.exports == nil { links.exports = [:] }
+                    links.exports?[id] = reservation
+                }
+            }
+            handoffStates[id] = .needsReview
+            handoffs[id] = reservation
+            let item = try source.create(title: task.title, due: reservation.due, marker: reservation.marker, in: scope)
+            guard item.scope == scope, item.marker == reservation.marker, !item.externalID.isEmpty else {
+                throw PrototypeError.unavailable("发送结果待核对，请刷新。")
+            }
+            try confirm(id, externalID: item.externalID, directory: store.directory)
+            message = "已发送到提醒事项。"
         } catch {
-            guard generation == token else { return }
+            guard isCurrent(token, store: store) else { return }
             message = error.localizedDescription
+        }
+    }
+
+    private func confirm(_ id: UUID, externalID: String, directory: URL) throws {
+        try ReminderLinks.update(in: directory) { links in
+            guard let record = links.exports?[id], record.externalID == nil || record.externalID == externalID else {
+                throw PrototypeError.unavailable("提醒事项身份不一致，请核对原清单。")
+            }
+            try links.updateExport(id) { $0.externalID = externalID; $0.status = .sent }
+        }
+        handoffStates[id] = .sent
+        handoffs[id]?.externalID = externalID
+        handoffs[id]?.status = .sent
+    }
+
+    private func reconcile(_ id: UUID, link expected: ReminderExport, matches: [MacReminderCandidate], store: TaskStore) throws {
+        // Both callers hold the handoff lock; another host could have acknowledged a
+        // completion while this host was awaiting its EventKit fetch.
+        guard let link = try ReminderLinks.read(from: store.directory).exports?[id],
+              link.scope == expected.scope, link.marker == expected.marker else { return }
+        guard matches.count == 1, let item = matches.first, !item.externalID.isEmpty,
+              link.externalID == nil || link.externalID == item.externalID,
+              let live = source.current(item.id), live == item else {
+            handoffStates[id] = .needsReview
+            return
+        }
+        guard link.completionApplied || link.pendingCompletionBaseline == nil || link.pendingCompletionActionID != nil else {
+            try ReminderLinks.update(in: store.directory) { links in
+                try links.updateExport(id) { $0.status = .needsReview }
+            }
+            handoffStates[id] = .needsReview
+            handoffs[id]?.status = .needsReview
+            message = "旧版完成回收曾中断，无法确认是否已执行。请在本机核对任务完成状态。"
+            return
+        }
+        if link.externalID == nil || link.status != .sent {
+            try confirm(id, externalID: item.externalID, directory: store.directory)
+        }
+        handoffStates[id] = .sent
+        guard item.completed, !link.completionApplied else { return }
+        let task = try store.snapshots().first { $0.id == id }
+        if let task, task.deletedAt == nil {
+            // Reserve a stable action before writing. TaskStore records the action in the
+            // same transaction as completion, so a retry never overwrites a later reopening.
+            let actionID = link.pendingCompletionActionID ?? UUID()
+            if link.pendingCompletionActionID == nil {
+                try ReminderLinks.update(in: store.directory) { links in
+                    try links.updateExport(id) { $0.pendingCompletionActionID = actionID }
+                }
+            }
+            try store.setCompleted(id: id, completed: true, actionID: actionID)
+        }
+        try ReminderLinks.update(in: store.directory) { links in
+            try links.updateExport(id) {
+                $0.completionApplied = true
+                $0.pendingCompletionActionID = nil
+                $0.pendingCompletionBaseline = nil
+            }
         }
     }
 
