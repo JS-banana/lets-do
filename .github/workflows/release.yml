@@ -1,6 +1,10 @@
 name: Release preview
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   push:
     tags: ['v*']
   workflow_dispatch:
@@ -20,20 +24,25 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
-  cancel-in-progress: false
-
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
 
 jobs:
   validate:
-    runs-on: macos-15
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+       github.event.workflow_run.head_repository.id == github.event.repository.id)
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
-      commit: ${{ steps.tag.outputs.commit }}
+      tag: ${{ steps.candidate.outputs.tag || steps.tag.outputs.tag }}
+      commit: ${{ steps.candidate.outputs.commit || steps.tag.outputs.commit }}
     steps:
       - name: Check out trusted main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,7 +50,14 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: false
+      - name: Resolve the version at the successful main CI commit
+        if: github.event_name == 'workflow_run'
+        id: candidate
+        env:
+          CI_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: python3 scripts/release.py plan --commit "$CI_COMMIT" >> "$GITHUB_OUTPUT"
       - name: Validate the existing version tag
+        if: github.event_name != 'workflow_run'
         id: tag
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
@@ -49,9 +65,11 @@ jobs:
 
   build:
     needs: validate
-    if: github.event_name != 'workflow_dispatch' || !inputs.publish_existing_draft
+    if: needs.validate.outputs.tag != '' && !inputs.publish_existing_draft
     runs-on: macos-15
     timeout-minutes: 45
+    outputs:
+      asset-id: ${{ steps.assets.outputs.artifact-id }}
     steps:
       - name: Check out the validated main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,9 +85,10 @@ jobs:
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
         run: python3 scripts/release.py package --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --asset-dir dist
       - name: Retain only verified release assets
+        id: assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mac-release-assets
+          name: mac-release-assets-${{ github.run_attempt }}
           path: |
             dist/*.dmg
             dist/*.zip
@@ -80,10 +99,13 @@ jobs:
 
   prepare:
     needs: [validate, build]
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
+    concurrency:
+      group: release-assets-${{ needs.validate.outputs.tag }}
+      queue: max
     steps:
       - name: Check out trusted main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,7 +116,7 @@ jobs:
       - name: Download verified Mac assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: mac-release-assets
+          artifact-ids: ${{ needs.build.outputs.asset-id }}
           path: dist
       - name: Upload and verify a candidate draft
         env:
@@ -107,10 +129,13 @@ jobs:
   publish:
     needs: validate
     if: github.event_name == 'workflow_dispatch' && inputs.publish_existing_draft
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
+    concurrency:
+      group: release-assets-${{ needs.validate.outputs.tag }}
+      queue: max
     steps:
       - name: Check out trusted main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

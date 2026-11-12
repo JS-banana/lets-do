@@ -8,21 +8,17 @@ Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、�
 
 [CI workflow](../.github/workflows/ci.yml) 在 `main` 推送、面向 `main` 的 Pull Request 和手动触发时运行，使用 GitHub 托管的 macOS 15 runner 与 Xcode 26.3，执行[开发说明](DEVELOPMENT.md#检查与构建)中的 XCTest、Local、CloudDevelopment、DesktopLocal 和 MacDistribution 编译。CI 仅有代码读取权限，同一分支的新运行可取消旧运行，摘要 artifact 保留七天。它不替代 GUI、Widget、升级或 Gatekeeper 验收。
 
-## 先生成候选草稿
+## 生成候选草稿
 
-[Release preview](../.github/workflows/release.yml) 将构建候选和公开发行分成两个步骤。推送版本标签默认只准备草稿，**不会自动公开**。
+[Release preview](../.github/workflows/release.yml) 自动生成待验收的草稿。公开发行在验收后由维护者触发。
 
-1. 在 [Base.xcconfig](../Config/Base.xcconfig) 更新 `MARKETING_VERSION` 与 `CURRENT_PROJECT_VERSION`，提交到 `main`，等待 CI 通过。
-2. 为待发布提交创建与版本一致的标签。以 `v0.2.0` 为例：
+1. 在发布 PR 中更新 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION`。版本号在 [Base.xcconfig](../Config/Base.xcconfig) 维护，自动流程识别高于现有版本标签的 `X.Y.Z` 版本。
+2. 合入 `main` 后，等待该提交的推送 CI 全部通过。`Release preview` 从通过 CI 的提交读取版本并打包，校验产物后将 `vX.Y.Z` 标签指向该提交并上传草稿。已有版本的普通提交会跳过。创建标签前会再检查 `main`，发现分支已推进时交给新提交的 CI 结果处理。
+3. 在运行摘要打开草稿，记录源码提交和 manifest SHA256，下载候选开始验收。
 
-   ```sh
-   git tag v0.2.0
-   git push origin v0.2.0
-   ```
+需要手动准备时，给已经通过 CI 的 `main` 提交推送版本一致的标签，或在 Actions 中从 `main` 运行 `Release preview`，填写已存在的 `tag`，保持 `publish_existing_draft=false`。打包或上传失败时可重跑失败任务，构建产物过了七天保留期则重跑整个流程。已有标签指向同一提交时可继续准备。标签在准备期间指向不同提交、已有草稿不完整或资产校验失败时，流程停止，保留现有材料供排查。
 
-3. 等待 `Release preview` 的 `validate`、`build`、`prepare` 完成。也可从 `main` 手动触发，填入已存在的 `tag`，保持 `publish_existing_draft=false`。
-
-流程核对标签格式、远程标签、标签中的版本与 `main` 祖先关系，锁定源码提交，运行 XCTest，再构建通用安装包。打包器保留 Widget，由内到外分别签名，并严格核对主应用／Widget 的身份、版本、URL、模型与 Intent 元数据、双架构以及权限；拒绝团队证书、App Group、云权限、调试权限及调试动态库。
+流程核对版本、标签与 `main` 祖先关系，锁定源码提交，运行 XCTest，再构建通用安装包。打包器保留 Widget，由内到外分别签名，并严格核对主应用／Widget 的身份、版本、URL、模型与 Intent 元数据、双架构以及权限；拒绝团队证书、App Group、云权限、调试权限及调试动态库。
 
 候选草稿必须恰好包含四份资产：
 
@@ -33,7 +29,7 @@ Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、�
 
 DMG 与 ZIP 携带同一份应用及 MIT LICENSE。manifest 记录源码提交、版本、构建号、源码散列、归档散列和包校验结果；它的运行验收字段明确只代表构建与打包检查。
 
-`prepare` 上传并核对资产后保留草稿，输出候选 manifest 的 SHA256。已有同标签的草稿或发行版时拒绝覆盖；失败时仅尝试删除本次新建、尚未完成的草稿，不覆盖已有发行资产。需重新构建时，先查明失败及保留材料，再决定新的候选，不使用重传掩盖差异。
+同标签已有完整草稿时，`prepare` 校验并返回草稿里原有资产的 manifest SHA256。发行版已公开时直接返回链接。上传失败时仅尝试删除本次新建、尚未完成的草稿。若验收发现问题，修复后用新版本生成候选。
 
 ## 验收同一份候选
 
@@ -60,7 +56,7 @@ shasum -a 256 release-manifest.json
 
 此次运行跳过构建和候选上传。发布器下载现有草稿资产，重新核对源码、manifest、归档散列及远端资产身份，确认 manifest 散列与输入一致后，将同一个草稿公开为预览版。**不重新编译、不重新签名、不重新上传资产。** 资产或标签发生变化、草稿缺失或散列不符时停止。
 
-`prepare` 与 `publish` job 使用 GitHub 自带的 `GITHUB_TOKEN`，仅这两个 job 获得 `contents: write`。无需额外 PAT、Apple 账户、签名 Secrets、临时 keychain 或维护者本机参与 CI 构建。
+`prepare` 与 `publish` 按标签串行写入，使用 GitHub 自带的 `GITHUB_TOKEN`。只有这两个任务获得 `contents: write`。自动创建标签后在同一轮运行上传草稿，无需 PAT、Apple 账户或签名 Secrets。
 
 ## 本机打包与留证
 

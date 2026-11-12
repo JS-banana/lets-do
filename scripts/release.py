@@ -12,8 +12,11 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+VERSION_TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 parser = argparse.ArgumentParser(description=__doc__)
 commands = parser.add_subparsers(dest="command", required=True)
+plan_command = commands.add_parser("plan", help="Resolve a candidate from a successful main CI commit.")
+plan_command.add_argument("--commit", required=True)
 for name in ("validate", "package", "prepare", "publish"):
     command = commands.add_parser(name)
     command.add_argument("--tag", required=True)
@@ -54,20 +57,58 @@ def run(name, command, *, allowed_failure=False):
     return result
 
 
+def remote_refs(*patterns):
+    output = run("remote-refs", ["git", "ls-remote", "origin", *patterns]).stdout
+    return {ref: sha for sha, ref in (line.split() for line in output.splitlines())}
+
+
+def tag_commit(refs, tag):
+    ref = f"refs/tags/{tag}"
+    return refs.get(ref + "^{}", refs.get(ref))
+
+
+def remote_tag_commit(tag):
+    ref = f"refs/tags/{tag}"
+    return tag_commit(remote_refs(ref, ref + "^{}"), tag)
+
+
+def source_tag(commit):
+    require(re.fullmatch(r"[0-9a-f]{40}", commit or ""), "Use the full SHA of a main commit.")
+    ancestry = run("main-ancestor", ["git", "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"],
+                   allowed_failure=True)
+    require(ancestry.returncode == 0, "The candidate commit must belong to origin/main.")
+    config = run("source-version", ["git", "show", f"{commit}:Config/Base.xcconfig"]).stdout
+    versions = re.findall(r"^MARKETING_VERSION[ \t]*=[ \t]*(\S+)[ \t]*$", config, re.MULTILINE)
+    require(len(versions) == 1 and VERSION_TAG.fullmatch("v" + versions[0]),
+            "Config/Base.xcconfig must define one numeric MARKETING_VERSION.")
+    return "v" + versions[0]
+
+
+def plan_candidate(commit):
+    tag = source_tag(commit)
+    refs = remote_refs("refs/tags/v*")
+    if tag_commit(refs, tag) == commit:
+        return tag
+    requested = tuple(map(int, VERSION_TAG.fullmatch(tag).groups()))
+    tagged_versions = (VERSION_TAG.fullmatch(ref.removeprefix("refs/tags/")) for ref in refs)
+    if any(tuple(map(int, match.groups())) >= requested for match in tagged_versions if match):
+        print(f"Skipping {tag}: no new version above the existing release tags.", file=sys.stderr)
+        return None
+    if remote_refs("refs/heads/main").get("refs/heads/main") != commit:
+        print(f"Skipping {tag}: main advanced after this CI run. The new tip needs its own successful CI.", file=sys.stderr)
+        return None
+    return tag
+
+
 def validate_tag(tag, expected=None):
-    require(re.fullmatch(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", tag),
+    require(VERSION_TAG.fullmatch(tag),
             "Use an existing tag such as v0.1.1, with no leading zeros or suffixes.")
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
         require(os.environ.get("GITHUB_REF") == "refs/heads/main", "Run manual releases from main.")
-    commit = run("resolve-tag", ["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"] ).stdout.strip()
+    commit = run("resolve-tag", ["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"]).stdout.strip()
     require(not expected or commit == expected, "The tag changed after validation.")
-    run("main-ancestor", ["git", "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"])
-    remote = run("remote-tag", ["git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"] ).stdout
-    refs = dict((line.split()[1], line.split()[0]) for line in remote.splitlines() if len(line.split()) == 2)
-    require(refs.get(f"refs/tags/{tag}^{{}}", refs.get(f"refs/tags/{tag}")) == commit, "The remote tag is missing or moved.")
-    config = run("tag-version", ["git", "show", f"{commit}:Config/Base.xcconfig"]).stdout
-    match = re.search(r"^MARKETING_VERSION\s*=\s*(\S+)\s*$", config, re.MULTILINE)
-    require(match and match.group(1) == tag[1:], "The tag must match MARKETING_VERSION at its commit.")
+    require(remote_tag_commit(tag) == commit, "The remote tag is missing or moved.")
+    require(source_tag(commit) == tag, "The tag must match MARKETING_VERSION at its commit.")
     return commit
 
 
@@ -138,10 +179,61 @@ def verify_uploaded(release, assets, hashes):
                 "A draft asset is incomplete or does not match its local hash.")
 
 
-def prepare(tag, commit, asset_dir):
+def download_candidate(repo, tag, commit, candidate):
+    require({asset["name"] for asset in candidate["assets"]} == set(asset_names(tag)), "Candidate assets are incomplete.")
+    asset_dir = logs / "candidate-assets"
+    asset_dir.mkdir()
+    command = ["gh", "release", "download", tag, "--repo", repo, "--dir", str(asset_dir)]
+    for name in asset_names(tag):
+        command.extend(["--pattern", name])
+    run("download-candidate", command)
+    assets, hashes = verify_assets(tag, commit, asset_dir)
+    verify_uploaded(candidate, assets, hashes)
+    return hashes
+
+
+def report_candidate(release, tag, commit, manifest_sha256):
+    print(f"Candidate {tag}: {release['html_url']}\nSource commit: {commit}\nCandidate manifest SHA256: {manifest_sha256}")
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        guide = f"https://github.com/{repository()}/blob/{commit}/docs/MAC-DISTRIBUTION.md#候选资产验收"
+        with Path(summary).open("a") as stream:
+            stream.write(f"## Mac release candidate {tag}\n\n"
+                         f"- [Download the four assets from the draft]({release['html_url']})\n"
+                         f"- Source commit `{commit}`\n"
+                         f"- Manifest SHA256 `{manifest_sha256}`\n\n"
+                         f"Use the [Mac acceptance checklist]({guide}) before publishing.\n")
+
+
+def create_candidate_tag(repo, tag, commit):
+    try:
+        run("create-tag", ["gh", "api", "--method", "POST", f"repos/{repo}/git/refs",
+                           "-f", f"ref=refs/tags/{tag}", "-f", f"sha={commit}"])
+    except RuntimeError:
+        if remote_tag_commit(tag) != commit:
+            raise
+        return
+    require(remote_tag_commit(tag) == commit, "GitHub did not confirm the tag at the expected commit.")
+
+
+def prepare(tag, commit, asset_dir, *, automatic=False):
     repo = repository()
     assets, hashes = verify_assets(tag, commit, asset_dir)
-    require(release_info(repo, tag) is None, "A release or draft already exists; refusing to replace it.")
+    existing = release_info(repo, tag)
+    tagged_commit = remote_tag_commit(tag)
+    if existing is not None:
+        require(tagged_commit == commit, "The existing release has a missing or conflicting tag.")
+        if existing["draft"]:
+            existing_hashes = download_candidate(repo, tag, commit, existing)
+            report_candidate(existing, tag, commit, existing_hashes["release-manifest.json"])
+        else:
+            print(f"Release {tag} is already published: {existing['html_url']}")
+        return
+    if automatic and tagged_commit is None:
+        if plan_candidate(commit) is None:
+            return
+        create_candidate_tag(repo, tag, commit)
+    else:
+        require(tagged_commit == commit, "The remote tag is missing or points at a different commit.")
     endpoint = f"repos/{repo}/releases"
     notes = logs / "release-notes.md"
     notes.write_text(f"Mac app preview with native Today, Week and Month Widgets (Intel and Apple silicon).\n\n"
@@ -166,9 +258,9 @@ def prepare(tag, commit, asset_dir):
         uploaded = json.loads(run("uploaded-assets", ["gh", "api", f"{endpoint}/{release_id}"]).stdout)
         require(uploaded.get("draft") is True, "The release must remain a draft until runtime acceptance.")
         verify_uploaded(uploaded, assets, hashes)
-        validate_tag(tag, commit)
+        require(remote_tag_commit(tag) == commit, "The remote tag is missing or moved.")
         complete = True
-        print(f"Prepared {tag} with four verified assets. Candidate manifest SHA256: {hashes['release-manifest.json']}")
+        report_candidate(uploaded, tag, commit, hashes["release-manifest.json"])
     finally:
         if release_id is not None and not complete:
             current = run("failed-draft-details", ["gh", "api", f"{endpoint}/{release_id}"], allowed_failure=True)
@@ -181,41 +273,53 @@ def publish(tag, commit, manifest_sha256):
     repo = repository()
     candidate = release_info(repo, tag)
     require(candidate is not None and candidate.get("draft") is True, "An existing unpublished candidate is required.")
-    require({asset["name"] for asset in candidate["assets"]} == set(asset_names(tag)), "Candidate assets are incomplete.")
-    asset_dir = logs / "candidate-assets"
-    asset_dir.mkdir()
-    for name in asset_names(tag):
-        run("download-candidate", ["gh", "release", "download", tag, "--repo", repo,
-                                   "--pattern", name, "--dir", str(asset_dir)])
-    assets, hashes = verify_assets(tag, commit, asset_dir)
+    hashes = download_candidate(repo, tag, commit, candidate)
     require(hashes["release-manifest.json"] == manifest_sha256, "Candidate assets differ from the runtime-verified manifest.")
-    verify_uploaded(candidate, assets, hashes)
     current = release_info(repo, tag)
     require(current is not None and current.get("id") == candidate["id"] and current.get("draft") is True,
             "The candidate changed during verification.")
-    fields = ("id", "name", "size", "digest", "updated_at")
+    fields = ("id", "name", "size", "digest", "state", "updated_at")
     identity = lambda release: sorted(tuple(str(asset.get(key)) for key in fields) for asset in release["assets"])
     require(identity(current) == identity(candidate), "Candidate assets changed during verification.")
     validate_tag(tag, commit)
-    run("publish-preview", ["gh", "release", "edit", tag, "--repo", repo, "--verify-tag",
-                            "--draft=false", "--prerelease", "--latest=false"])
-    published = release_info(repo, tag)
-    require(published is not None and published.get("id") == candidate["id"] and published.get("draft") is False,
+    endpoint = f"repos/{repo}/releases/{candidate['id']}"
+    published = json.loads(run("publish-preview", ["gh", "api", "--method", "PATCH", endpoint,
+        "-F", "draft=false", "-F", "prerelease=true", "-f", "make_latest=false"]).stdout)
+    require(published.get("id") == candidate["id"] and published.get("tag_name") == tag and
+            published.get("draft") is False and published.get("prerelease") is True and
+            identity(published) == identity(candidate),
             "Publication was not confirmed by GitHub.")
+    require(remote_tag_commit(tag) == commit, "The remote tag changed during publication.")
     print(f"Published {tag} with the same four runtime-verified assets.")
 
 
-try:
-    resolved = validate_tag(args.tag, args.commit)
+def main():
+    if args.command == "plan":
+        tag = plan_candidate(args.commit)
+        if tag is not None:
+            print("tag=" + tag)
+            print("commit=" + args.commit)
+        return
+
+    automatic = os.environ.get("GITHUB_EVENT_NAME") == "workflow_run" and args.command in ("package", "prepare")
+    if automatic:
+        require(source_tag(args.commit) == args.tag, "The candidate version changed after validation.")
+        resolved = args.commit
+    else:
+        resolved = validate_tag(args.tag, args.commit)
     if args.command == "validate":
         print("tag=" + args.tag)
         print("commit=" + resolved)
     elif args.command == "package":
         package(resolved, args.asset_dir)
     elif args.command == "prepare":
-        prepare(args.tag, resolved, args.asset_dir)
+        prepare(args.tag, resolved, args.asset_dir, automatic=automatic)
     else:
         publish(args.tag, resolved, args.manifest_sha256)
+
+
+try:
+    main()
 except RuntimeError as error:
     # RuntimeError messages above are deliberately authored without raw command output.
     print("Release step failed: " + str(error), file=sys.stderr)
