@@ -4,7 +4,7 @@ enum CalendarPresentation: String, Equatable, Sendable { case week, month, agend
 
 enum AppDestination: Equatable, Sendable {
     case today
-    case inbox
+    case todo
     case task(UUID)
     case calendar(Day, CalendarPresentation)
     case weekList(Day, WeekTaskList)
@@ -19,7 +19,7 @@ enum AppDestination: Equatable, Sendable {
         parts.scheme = Self.scheme
         switch self {
         case .today: parts.host = "open"; parts.path = "/today"
-        case .inbox: parts.host = "open"; parts.path = "/inbox"
+        case .todo: parts.host = "open"; parts.path = "/todo"
         case .task(let id): parts.host = "task"; parts.path = "/\(id.uuidString)"
         case .calendar(let day, let view):
             parts.host = "calendar"; parts.path = "/\(day.rawValue)"
@@ -50,7 +50,7 @@ enum AppDestination: Equatable, Sendable {
             guard queries.isEmpty else { return nil }
             switch path {
             case ["today"]: self = .today
-            case ["inbox"]: self = .inbox
+            case ["todo"], ["inbox"]: self = .todo
             default: return nil
             }
         case "task":

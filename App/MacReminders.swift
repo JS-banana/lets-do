@@ -555,7 +555,7 @@ final class MacReminders: ObservableObject {
                 links.imports[index].committed = true
             }
             candidates.removeAll { $0.id == candidate.id }
-            message = "已加入收集箱。"
+            message = "已导入到「待办」。"
         } catch { message = error.localizedDescription }
     }
 }
