@@ -54,8 +54,10 @@ final class CaptureDraft: ObservableObject {
         store = nil
     }
 
-    func persist() {
-        guard !restoring, let store else { return }
+    @discardableResult
+    func persist() -> Bool {
+        if restoring { return true }
+        guard let store else { return !content.hasText }
         do {
             if !content.hasText { try store.removeDraft(id: id); status = "" }
             else {
@@ -64,7 +66,11 @@ final class CaptureDraft: ObservableObject {
                     captureSchedule: plan.schedule, formatting: content.formatting))
                 status = "草稿已保存在此设备"
             }
-        } catch { status = "草稿未能保存：\(error.localizedDescription)" }
+            return true
+        } catch {
+            status = "草稿未能保存：\(error.localizedDescription)"
+            return false
+        }
     }
 
     func save(using model: PrototypeModel) -> Bool {

@@ -18,28 +18,28 @@ struct PrototypeView: View {
     @Environment(\.colorScheme) private var colorScheme
     #if os(macOS)
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var quickEntryFocused: Bool
+    @FocusState private var macSearchFocused: Bool
+    @State private var macSearchExpanded = false
     @State private var mainWindowID = UUID()
     #endif
-    @State private var showTrash = false
     @State private var search = ""
-    @FocusState private var searchFocused: Bool
-    @State private var filter = TaskFilter.unscheduled
     @State private var earlierExpanded = true
-    @State private var completedExpanded = false
+    @State private var destination = Destination.today
     #if os(macOS)
     @State private var section = Workspace.week
-    @State private var destination = MacDestination.today
     @State private var columns = NavigationSplitViewVisibility.all
-    @State private var showingUnscheduled = false
     @State private var showingReminderImport = false
+    @State private var calendarDrawer: CalendarDrawer?
     #else
     @State private var section = Workspace.month
-    @State private var phoneTab = PhoneTab.today
-    private enum PhoneTab: String { case today = "今天", inbox = "收集箱", calendar = "日历" }
-    #endif
+    @State private var presentingSearch = false
+    @State private var phoneArchive: Destination?
+    @State private var archiveSearch = ""
     @State private var weekList: WeekTaskList?
     @State private var calendarDetailDay: Day?
+    #endif
     @State private var calendarDay = Day(date: Date(), timeZone: .current)
     @State private var capturing = false
     @State private var showingInfo = false
@@ -62,22 +62,87 @@ struct PrototypeView: View {
     private var captureInThisWindow: Bool { captureSession.mainWindowID == mainWindowID }
     #endif
 
-    private enum TaskFilter: String, CaseIterable {
-        case all = "全部", unscheduled = "未安排", completed = "已完成"
-    }
+    private enum Destination: String, CaseIterable {
+        case today = "今天", calendar = "日历", todo = "待办", completed = "已完成", trash = "回收站"
 
-    private var listed: [TaskSnapshot] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return model.tasks.filter { task in
-            guard showTrash ? task.deletedAt != nil : task.deletedAt == nil else { return false }
-            guard query.isEmpty || task.title.localizedStandardContains(query) else { return false }
-            if showTrash { return true }
-            switch filter {
-            case .all: return true
-            case .unscheduled: return task.schedule == .none && !task.isCompleted
-            case .completed: return task.isCompleted
+        var symbol: String {
+            switch self {
+            case .today: "sun.max"
+            case .calendar: "calendar"
+            case .todo: "list.bullet"
+            case .completed: "checkmark.circle"
+            case .trash: "trash"
             }
         }
+
+        var acceptsNewTasks: Bool { self == .today || self == .calendar || self == .todo }
+    }
+
+    private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var destinationSelection: Binding<Destination> {
+        Binding(get: { destination }, set: { navigate($0) })
+    }
+
+    private func navigate(_ next: Destination) {
+        TaskWritingEditor.finishEditing()
+        #if os(macOS)
+        captureSession.mainWindowID = nil
+        calendarDrawer = nil
+        macSearchExpanded = false
+        macSearchFocused = false
+        #else
+        capturing = false
+        presentingSearch = false
+        phoneArchive = nil
+        weekList = nil
+        #endif
+        model.selection = nil
+        search = ""
+        destination = next
+        #if os(macOS)
+        captureSession.begin(schedule: contextCaptureSchedule)
+        #endif
+    }
+
+    private func collection(in page: Destination, matching query: String) -> [TaskSnapshot] {
+        if !query.isEmpty {
+            let searchable = page == .trash ? model.tasks.filter { $0.deletedAt != nil } : model.active
+            return searchable.filter { $0.title.localizedStandardContains(query) }
+        }
+        switch page {
+        case .todo:
+            return model.active.filter { !$0.isCompleted }
+        case .completed:
+            return model.active.filter(\.isCompleted)
+                .sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
+        case .trash:
+            return model.tasks.filter { $0.deletedAt != nil }
+        case .today, .calendar:
+            return []
+        }
+    }
+
+    private func collectionEmptyTitle(in page: Destination, matching query: String) -> String {
+        if !query.isEmpty { return "没有找到匹配任务" }
+        switch page {
+        case .completed: return "还没有已完成任务"
+        case .trash: return "回收站是空的"
+        default: return "没有待办任务"
+        }
+    }
+
+    private var searchPrompt: String {
+        destination == .trash ? "搜索回收站" : "搜索任务标题"
+    }
+
+    private func rowScheduleLabel(for task: TaskSnapshot) -> String {
+        task.schedule == .none ? "未安排" : AppStyle.scheduleLabel(task.schedule)
+    }
+
+    private func showsCollectionSchedule(for task: TaskSnapshot) -> Bool {
+        if destination == .todo && query.isEmpty { return true }
+        return task.schedule != .none && (destination != .today || !query.isEmpty)
     }
 
     var body: some View {
@@ -105,14 +170,18 @@ struct PrototypeView: View {
             search = ""
             #if os(macOS)
             showingReminderImport = false
+            #else
+            archiveSearch = ""
             #endif
         }
         .onChange(of: calendarDay) { _, day in
-            if calendarDetailDay != nil { calendarDetailDay = day }
             #if os(macOS)
-            if destination == .calendar && !hasCaptureDraft {
+            // A calendar cell can change the day and open capture with its own schedule.
+            if destination == .calendar && !captureInThisWindow && !hasCaptureDraft {
                 captureSession.begin(schedule: contextCaptureSchedule)
             }
+            #else
+            if calendarDetailDay != nil { calendarDetailDay = day }
             #endif
         }
         .onOpenURL(perform: openURL)
@@ -135,23 +204,14 @@ struct PrototypeView: View {
     }
 
     #if os(macOS)
-    private enum MacDestination: String, CaseIterable {
-        case today = "今天", inbox = "收集箱", calendar = "日历"
-        case all = "全部任务", completed = "已完成", trash = "回收站"
-
-        var symbol: String {
-            switch self {
-            case .today: "sun.max"
-            case .inbox: "tray"
-            case .calendar: "calendar"
-            case .all: "list.bullet"
-            case .completed: "checkmark.circle"
-            case .trash: "trash"
-            }
-        }
+    private enum CalendarDrawer: Equatable {
+        case day
+        case week(WeekTaskList)
     }
 
-    private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var visibleCalendarDrawer: CalendarDrawer? {
+        destination == .calendar && query.isEmpty && model.loaded ? calendarDrawer : nil
+    }
 
     private var macWorkspace: some View {
         let newTaskAction: (() -> Void)? = model.loaded ? { beginContextCapture() } : nil
@@ -160,29 +220,12 @@ struct PrototypeView: View {
                 macSidebar
                     .navigationSplitViewColumnWidth(min: 180, ideal: 208, max: 240)
             } detail: {
-                HStack(spacing: 0) {
-                    if (model.selected == nil && !captureInThisWindow) || geometry.size.width >= 1040 {
-                        macContent
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                macContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .trailing) {
+                        macDrawer(width: min(342, max(280, geometry.size.width * 0.40)))
                     }
-                    if captureInThisWindow {
-                        if geometry.size.width >= 1040 { Divider() }
-                        CaptureSheet(content: $captureSession.content, plan: $captureSession.plan,
-                                     draftStatus: captureSession.status, loaded: model.loaded,
-                                     cancel: { captureSession.mainWindowID = nil }, save: {
-                            if captureSession.save(using: model) { captureSession.mainWindowID = nil }
-                        }, embedded: true)
-                            .frame(maxWidth: geometry.size.width >= 1040 ? 360 : .infinity)
-                    } else if let task = model.selected {
-                        if geometry.size.width >= 1040 { Divider() }
-                        TaskDetail(model: model, task: task, compact: geometry.size.width < 1040)
-                            .id(task.id)
-                            .id(model.store.map(ObjectIdentifier.init))
-                            .frame(maxWidth: geometry.size.width >= 1040 ? 340 : .infinity)
-                    }
-                }
-                .toolbar { macToolbar }
-                .searchable(text: $search, prompt: "搜索全部任务")
+                    .toolbar { macToolbar(windowWidth: geometry.size.width) }
             }
             .navigationSplitViewStyle(.balanced)
             .onChange(of: geometry.size.width, initial: true) { previous, width in
@@ -209,35 +252,189 @@ struct PrototypeView: View {
         .focusedSceneValue(\.newTask, newTaskAction)
     }
 
-    private func navigate(_ next: MacDestination) {
+    private var drawerIsOpen: Bool {
+        captureInThisWindow || model.selected != nil || visibleCalendarDrawer != nil
+    }
+
+    private var macCalendarDateControls: some View {
+        let isWeek = section == .week
+        let monday = calendarDay.weekStart ?? calendarDay
+        let sunday = monday.addingIfPossible(days: 6) ?? monday
+        let title = isWeek ? weekToolbarTitle(from: monday, through: sunday) : AppStyle.monthLabel(calendarDay)
+        return HStack(spacing: 10) {
+            Picker("日历视图", selection: Binding(get: { section }, set: { calendarDrawer = nil; section = $0 })) {
+                ForEach([Workspace.week, .month], id: \.self) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented).fixedSize().accessibilityIdentifier("calendarViews")
+            CalendarDateButton(day: $calendarDay, title: title, minimumHeight: 30)
+                .accessibilityIdentifier(isWeek ? "calendarWeek" : "calendarMonth")
+            MacCalendarNavigation(selectedDay: $calendarDay, isWeek: isWeek) { delta in
+                if isWeek {
+                    if let day = calendarDay.addingIfPossible(days: delta * 7) { calendarDay = day }
+                } else if let day = MonthView.shiftedMonth(from: calendarDay, by: delta) {
+                    calendarDay = day
+                }
+            }
+        }
+        .fixedSize()
+    }
+
+    private func weekToolbarTitle(from firstDay: Day, through lastDay: Day) -> String {
+        if firstDay.rawValue.prefix(7) == lastDay.rawValue.prefix(7), let date = Int(lastDay.rawValue.suffix(2)) {
+            return "\(AppStyle.dayLabel(firstDay).dropLast())–\(date)日"
+        }
+        return "\(AppStyle.dayLabel(firstDay)) – \(AppStyle.dayLabel(lastDay))"
+    }
+
+    private var macWeekPendingButton: some View {
+        let monday = calendarDay.weekStart ?? calendarDay
+        let count = WeekTaskList.pending.tasks(from: model.active, weekStart: monday, timeZone: .current).count
+        let isOpen = calendarDrawer == .week(.pending)
+        return Button { calendarDrawer = isOpen ? nil : .week(.pending) } label: {
+            Label(count == 0 ? "待安排" : "待安排 \(count)", systemImage: "list.bullet")
+                .foregroundStyle(isOpen ? AppStyle.accentText(colorScheme) : .primary)
+        }
+        .help("查看本周待安排")
+        .accessibilityLabel("本周待安排")
+        .accessibilityValue("\(count) 项")
+        .accessibilityAddTraits(isOpen ? .isSelected : [])
+        .accessibilityIdentifier("showWeekPending")
+    }
+
+    private func macDrawer(width: CGFloat) -> some View {
+        ZStack(alignment: .trailing) {
+            if drawerIsOpen {
+                Group {
+                    if captureInThisWindow {
+                        CaptureSheet(content: $captureSession.content, plan: $captureSession.plan,
+                                     draftStatus: captureSession.status, loaded: model.loaded,
+                                     cancel: { _ = closeCaptureDrawer() }, save: {
+                            if captureSession.save(using: model) { captureSession.mainWindowID = nil }
+                        }, embedded: true, outsideDismiss: closeCaptureDrawer)
+                    } else if let task = model.selected {
+                        TaskDetail(model: model, task: task, inDrawer: true)
+                            .id(task.id)
+                            .id(model.store.map(ObjectIdentifier.init))
+                    } else if let drawer = visibleCalendarDrawer {
+                        macCalendarAgenda(drawer)
+                    }
+                }
+                .frame(width: width)
+                .frame(maxHeight: .infinity)
+                .background {
+                    Rectangle()
+                        .fill(.thickMaterial)
+                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.32 : 0.16),
+                                radius: 12, x: -5, y: 0)
+                        .accessibilityHidden(true)
+                }
+                .accessibilityIdentifier("workspaceDrawer")
+                .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
+                .zIndex(1)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .clipped()
+        .animation(reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.24), value: drawerIsOpen)
+    }
+
+    private func closeCaptureDrawer() -> Bool {
+        guard captureInThisWindow else { return true }
         TaskWritingEditor.finishEditing()
+        guard captureSession.persist() else { return false }
         captureSession.mainWindowID = nil
-        model.selection = nil
-        search = ""
-        completedExpanded = false
-        weekList = nil
-        destination = next
-        captureSession.begin(schedule: contextCaptureSchedule)
+        return true
+    }
+
+    private func macCalendarAgenda(_ drawer: CalendarDrawer) -> some View {
+        let day = calendarDay
+        let monday = day.weekStart ?? day
+        let title: String
+        let tasks: [TaskSnapshot]
+        let emptyTitle: String
+        switch drawer {
+        case .day:
+            title = AppStyle.dayLabel(day) + " · " + AppStyle.weekdayLabel(day)
+            tasks = model.scheduled(on: day)
+            emptyTitle = "这一天没有安排"
+        case .week(let list):
+            title = list.title
+            tasks = list.tasks(from: model.active, weekStart: monday, timeZone: .current)
+            emptyTitle = list == .pending ? "这一周没有待安排任务" : "此前各周没有未完成任务"
+        }
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+                if !tasks.isEmpty {
+                    Text("\(tasks.count) 项").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Button { calendarDrawer = nil } label: {
+                    Image(systemName: "xmark").frame(width: 28, height: 28)
+                }.buttonStyle(.borderless).foregroundStyle(.secondary)
+                    .help("收起清单").accessibilityLabel("收起清单")
+                    .accessibilityIdentifier(drawer == .day ? "closeDayTasks" : "closeWeekTasks")
+                    .keyboardShortcut(macSearchExpanded ? nil : .cancelAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            Divider()
+            WorkspaceScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if tasks.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(emptyTitle).foregroundStyle(.secondary)
+                            calendarAgendaAddAction(drawer, day: day)
+                        }.padding(.vertical, 18)
+                    }
+                    ForEach(tasks) { task in
+                        if drawer == .day {
+                            TaskAgendaRow(task: task, complete: { model.toggleCompletion(task) }) { model.selection = task.id }
+                        } else {
+                            macTaskRow(task, today: Day(date: Date(), timeZone: .current), showSchedule: drawer == .week(.previousWeeks))
+                        }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16)
+            }
+            if !tasks.isEmpty && drawer != .week(.previousWeeks) {
+                Divider()
+                calendarAgendaAddAction(drawer, day: day).padding(16)
+            }
+        }
+        .accessibilityIdentifier(drawer == .day ? "dayTasks-\(day.rawValue)" : "weekTasks-\(monday.rawValue)")
+    }
+
+    @ViewBuilder
+    private func calendarAgendaAddAction(_ drawer: CalendarDrawer, day: Day) -> some View {
+        if drawer != .week(.previousWeeks) {
+            Button(drawer == .day ? "添加任务" : "加入本周", systemImage: "plus") {
+                if drawer == .day { beginCapture(day: day) }
+                else { presentCapture(schedule: .week(start: day.weekStart ?? day)) }
+            }.buttonStyle(.borderless)
+                .accessibilityIdentifier(drawer == .day ? "addDayTask" : "addToWeek")
+        }
     }
 
     private var macSidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            List(selection: Binding(get: { destination }, set: { navigate($0) })) {
-                ForEach([MacDestination.today, .inbox, .calendar], id: \.self) { item in
-                    Label(item.rawValue, systemImage: item.symbol).tag(item)
-                        .padding(.vertical, 5).accessibilityIdentifier("nav-\(item)")
+            List(selection: destinationSelection) {
+                ForEach([Destination.today, .calendar, .todo], id: \.self) { item in
+                    macSidebarRow(item)
                 }
                 Section {
-                    ForEach([MacDestination.all, .completed], id: \.self) { item in
-                        Label(item.rawValue, systemImage: item.symbol).tag(item)
-                            .padding(.vertical, 5).accessibilityIdentifier("nav-\(item)")
+                    ForEach([Destination.completed, .trash], id: \.self) { item in
+                        macSidebarRow(item)
                     }
+                } header: {
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor))
+                        .frame(height: 1)
+                        .selectionDisabled()
+                        .accessibilityHidden(true)
                 }
-                Section {
-                    Label("回收站", systemImage: "trash").tag(MacDestination.trash)
-                        .padding(.vertical, 5).accessibilityIdentifier("nav-trash")
-                }
-            }.listStyle(.sidebar)
+            }
+            .listStyle(.sidebar)
+            .environment(\.defaultMinListHeaderHeight, 12)
+            .padding(.vertical, 6)
             Divider().padding(.horizontal, 14)
             Button { showingInfo = true } label: {
                 HStack(spacing: 10) {
@@ -253,22 +450,82 @@ struct PrototypeView: View {
         }
     }
 
+    private func macSidebarRow(_ item: Destination) -> some View {
+        Label {
+            Text(item.rawValue)
+                .font(.system(size: 15))
+                .fontWeight(.regular)
+        } icon: {
+            let icon = Image(systemName: item.symbol)
+                .font(.system(size: 17))
+                .imageScale(.medium)
+                .frame(width: 24)
+            if item.acceptsNewTasks || destination == item {
+                icon
+            } else {
+                icon.foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+        .tag(item)
+        .accessibilityIdentifier("nav-\(item)")
+    }
+
     @ToolbarContentBuilder
-    private var macToolbar: some ToolbarContent {
+    private func macToolbar(windowWidth: CGFloat) -> some ToolbarContent {
+        let showCalendar = model.loaded && destination == .calendar && query.isEmpty
         ToolbarItem(placement: .navigation) {
-            if destination == .calendar && query.isEmpty && weekList == nil {
-                Picker("日历视图", selection: Binding(get: { section }, set: { calendarDetailDay = nil; section = $0 })) {
-                    ForEach([Workspace.week, .month], id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).frame(width: 148).accessibilityIdentifier("calendarViews")
+            if showCalendar && (!macSearchExpanded || windowWidth >= 840) {
+                macCalendarDateControls
             }
         }
-        ToolbarItemGroup(placement: .primaryAction) {
-            if destination == .calendar && query.isEmpty && weekList == nil {
-                Button { showingUnscheduled.toggle() } label: { Image(systemName: "tray.and.arrow.down") }
-                    .help("待安排任务").accessibilityLabel("待安排任务")
-                    .popover(isPresented: $showingUnscheduled) { unscheduledTasks }
-            }
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.flexible, placement: .primaryAction)
         }
+        ToolbarItem(placement: .primaryAction) {
+            if showCalendar && section == .week && !macSearchExpanded { macWeekPendingButton }
+        }
+        ToolbarItem(placement: .primaryAction) { macSearchControl }
+    }
+
+    @ViewBuilder
+    private var macSearchControl: some View {
+        if macSearchExpanded {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary).accessibilityHidden(true)
+                TextField(searchPrompt, text: $search)
+                    .textFieldStyle(.plain)
+                    .focused($macSearchFocused)
+                    .accessibilityIdentifier("macSearchField")
+                Button("结束搜索", systemImage: "xmark.circle.fill", action: endMacSearch)
+                    .labelStyle(.iconOnly).buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("结束搜索")
+            }
+            .padding(.horizontal, 8)
+            .frame(width: 216, height: 30)
+            .onExitCommand(perform: endMacSearch)
+            .task {
+                await Task.yield()
+                macSearchFocused = true
+            }
+        } else {
+            Button("搜索任务", systemImage: "magnifyingglass") {
+                if captureInThisWindow && !closeCaptureDrawer() { return }
+                macSearchExpanded = true
+            }
+            .labelStyle(.iconOnly)
+            .help("搜索任务")
+            .keyboardShortcut(model.selected == nil && !captureInThisWindow ? KeyboardShortcut("f") : nil)
+            .accessibilityIdentifier("openMacSearch")
+        }
+    }
+
+    private func endMacSearch() {
+        macSearchFocused = false
+        macSearchExpanded = false
+        search = ""
     }
 
     @ViewBuilder
@@ -280,10 +537,7 @@ struct PrototypeView: View {
                     Button("重新打开任务库") { Task { await model.start() } }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if destination == .calendar && query.isEmpty {
-                VStack(spacing: 0) {
-                    plannerContent.frame(maxHeight: .infinity)
-                    calendarDayPanel
-                }
+                plannerContent.frame(maxHeight: .infinity)
             } else {
                 TimelineView(.periodic(from: .now, by: 60)) { context in
                     macTaskCollection(today: Day(date: context.date, timeZone: .current))
@@ -291,7 +545,7 @@ struct PrototypeView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if model.loaded && query.isEmpty && destination != .completed && destination != .trash && weekList != .previousWeeks { quickEntry }
+            if model.loaded && query.isEmpty && (destination == .today || destination == .todo) { quickEntry }
         }
     }
 
@@ -304,8 +558,8 @@ struct PrototypeView: View {
         switch destination {
         case .today: return quickEntrySchedule
         case .calendar:
-            if weekList == .pending { return .week(start: calendarDay) }
-            if weekList == .previousWeeks { return .none }
+            if calendarDrawer == .week(.pending) { return .week(start: calendarDay.weekStart ?? calendarDay) }
+            if calendarDrawer == .week(.previousWeeks) { return .none }
             return .allDay(start: calendarDay, endExclusive: calendarDay.addingIfPossible(days: 1) ?? calendarDay)
         default: return .none
         }
@@ -331,7 +585,7 @@ struct PrototypeView: View {
             .background(AppStyle.accent.opacity(colorScheme == .dark ? 0.14 : 0.06), in: RoundedRectangle(cornerRadius: 6))
             .overlay { RoundedRectangle(cornerRadius: 6).stroke(quickEntryFocused ? AppStyle.accentText(colorScheme).opacity(0.55) : Color.clear, lineWidth: 1) }
             if hasCaptureDraft && captureSession.plan.schedule != contextCaptureSchedule {
-                Text(captureSession.plan.schedule == .none ? "添加到收集箱" : "添加到" + AppStyle.scheduleLabel(captureSession.plan.schedule))
+                Text(captureSession.plan.schedule == .none ? "添加为未安排" : "添加到" + AppStyle.scheduleLabel(captureSession.plan.schedule))
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let error = captureSession.plan.error {
@@ -369,27 +623,15 @@ struct PrototypeView: View {
         }
     }
 
-    private func collection() -> [TaskSnapshot] {
-        if !query.isEmpty { return model.active.filter { $0.title.localizedStandardContains(query) } }
-        switch destination {
-        case .inbox: return model.active.filter { $0.schedule == .none }
-        case .completed: return model.active.filter(\.isCompleted).sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
-        case .trash: return model.tasks.filter { $0.deletedAt != nil }
-        default: return model.active
-        }
-    }
-
     private func macTaskCollection(today: Day) -> some View {
-        let tasks = destination == .today && query.isEmpty ? [] : collection()
-        return ScrollView {
+        let tasks = collection(in: destination, matching: query)
+        return WorkspaceScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(query.isEmpty ? destination.rawValue : "搜索结果").font(.system(size: 26, weight: .semibold))
                         Spacer()
-                        if !query.isEmpty {
-                            Button("结束搜索") { search = "" }.buttonStyle(.borderless)
-                        } else if destination == .inbox && model.loaded {
+                        if query.isEmpty && destination == .todo {
                             Button("从提醒事项导入", systemImage: "tray.and.arrow.down") { showingReminderImport = true }
                                 .buttonStyle(.borderless)
                         }
@@ -403,8 +645,12 @@ struct PrototypeView: View {
                 }
                 if destination == .today && query.isEmpty {
                     todaySections(on: today)
+                } else if tasks.isEmpty {
+                    macCollectionEmpty
                 } else {
-                    collectionRows(tasks: tasks, today: today)
+                    LazyVStack(spacing: 0) {
+                        ForEach(tasks) { task in macTaskRow(task, today: today) }
+                    }
                 }
             }
             .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 24)
@@ -413,35 +659,14 @@ struct PrototypeView: View {
             .accessibilityIdentifier(query.isEmpty ? "collection-\(destination)" : "searchResults")
     }
 
-    @ViewBuilder
-    private func collectionRows(tasks: [TaskSnapshot], today: Day) -> some View {
-        let unfinished = tasks.filter { !$0.isCompleted }
-        let finished = tasks.filter(\.isCompleted)
-        let separated = query.isEmpty && destination != .completed && destination != .trash
-        if tasks.isEmpty || (separated && unfinished.isEmpty) {
-            macCollectionEmpty(hasFinished: !finished.isEmpty)
-        }
-        LazyVStack(spacing: 0) {
-            ForEach(separated ? unfinished : tasks) { task in macTaskRow(task, today: today) }
-        }
-        if separated && !finished.isEmpty {
-            DisclosureGroup("已完成 · \(finished.count)", isExpanded: $completedExpanded) {
-                LazyVStack(spacing: 0) { ForEach(finished) { task in macTaskRow(task, today: today) } }
-                    .padding(.top, 8)
-            }.font(.subheadline).foregroundStyle(.secondary)
-        }
-    }
-
-    private func macCollectionEmpty(hasFinished: Bool) -> some View {
+    private var macCollectionEmpty: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(!query.isEmpty ? "没有找到匹配任务" : hasFinished ? "当前任务都完成了" : destination == .today ? "今天还没有安排" : destination == .inbox ? "收集箱是空的" : destination == .completed ? "还没有已完成任务" : destination == .trash ? "回收站是空的" : "从第一件事开始")
-                .font(.title3.weight(.medium))
-            if query.isEmpty && (destination == .today || destination == .inbox || destination == .all) {
-                HStack(spacing: 16) {
-                    Text("在下方记下一件事，回车即可添加。").font(.callout).foregroundStyle(.secondary)
-                    if destination == .today { Button("去收集箱看看") { navigate(.inbox) }.buttonStyle(.borderless) }
-                }
-            } else if !query.isEmpty { Text("试试更短的标题关键词。").foregroundStyle(.secondary) }
+            Text(collectionEmptyTitle(in: destination, matching: query)).font(.title3.weight(.medium))
+            if !query.isEmpty {
+                Text("试试更短的标题关键词。").foregroundStyle(.secondary)
+            } else if destination == .todo {
+                Text("在下方记下一件事，回车即可添加。").font(.callout).foregroundStyle(.secondary)
+            }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 36)
     }
 
@@ -454,12 +679,12 @@ struct PrototypeView: View {
                     .frame(width: 30, height: 38)
             }.buttonStyle(.plain).disabled(task.deletedAt != nil)
                 .accessibilityLabel(task.isCompleted ? "设为未完成：\(task.title)" : "完成：\(task.title)")
-            Button { showingUnscheduled = false; model.selection = task.id } label: {
+            Button { model.selection = task.id } label: {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(task.title).font(.body.weight(.medium)).foregroundStyle(task.isCompleted ? .secondary : .primary)
                         .strikethrough(task.isCompleted).fixedSize(horizontal: false, vertical: true)
-                    if (showSchedule || destination != .today || !query.isEmpty) && task.schedule != .none {
-                        Text(AppStyle.scheduleLabel(task.schedule)).font(.caption).foregroundStyle(.secondary)
+                    if showSchedule || showsCollectionSchedule(for: task) {
+                        Text(rowScheduleLabel(for: task)).font(.caption).foregroundStyle(.secondary)
                     }
                     if let note = task.currentNote?.body, !note.isEmpty {
                         Text(note.replacingOccurrences(of: "\n", with: " ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -468,7 +693,7 @@ struct PrototypeView: View {
                         Label("\(task.heads.count) 个正文分支", systemImage: "arrow.triangle.branch").font(.caption).foregroundStyle(.orange)
                     }
                 }.frame(maxWidth: .infinity, minHeight: 38, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityLabel("打开任务：\(task.title)").accessibilityValue(AppStyle.scheduleLabel(task.schedule))
+            }.buttonStyle(.plain).accessibilityLabel("打开任务：\(task.title)").accessibilityValue(rowScheduleLabel(for: task))
         }
         .padding(.vertical, 6).padding(.horizontal, 6)
         .background(model.selection == task.id ? AppStyle.accent.opacity(0.07) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
@@ -486,20 +711,9 @@ struct PrototypeView: View {
         .accessibilityIdentifier("task-\(task.id.uuidString)")
     }
 
-    private var unscheduledTasks: some View {
-        let tasks = model.active.filter { !$0.isCompleted && $0.schedule == .none }
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("待安排任务").font(.headline)
-            Text("拖到日历日期，或打开详情设置安排。").font(.caption).foregroundStyle(.secondary)
-            if tasks.isEmpty { Text("没有未安排任务").foregroundStyle(.secondary).padding(.vertical, 20) }
-            ScrollView { LazyVStack(spacing: 0) { ForEach(tasks) { task in macTaskRow(task, today: Day(date: Date(), timeZone: .current)) } } }
-        }.padding(20).frame(width: 340, height: 360)
-    }
-
     private func beginContextCapture() {
-        search = ""
-        captureSession.begin(schedule: contextCaptureSchedule)
-        presentCapture(schedule: captureSession.plan.schedule)
+        endMacSearch()
+        presentCapture(schedule: contextCaptureSchedule)
     }
 
     @ViewBuilder
@@ -523,9 +737,86 @@ struct PrototypeView: View {
         }
     }
     #else
+    private enum PhoneRoute: Hashable {
+        case archive(Destination)
+        case task(UUID)
+    }
+
+    private var phonePath: Binding<[PhoneRoute]> {
+        Binding(get: {
+            [phoneArchive.map(PhoneRoute.archive), model.selection.map(PhoneRoute.task)].compactMap { $0 }
+        }, set: { path in
+            let archive: Destination? = if case .archive(let page) = path.first { page } else { nil }
+            let task: UUID? = if case .task(let id) = path.last { id } else { nil }
+            if phoneArchive != archive { phoneArchive = archive }
+            if model.selection != task { model.selection = task }
+        })
+    }
+
     private var phoneWorkspace: some View {
-        NavigationStack {
-            TabView(selection: $phoneTab) {
+        NavigationStack(path: phonePath) {
+            TabView(selection: destinationSelection) {
+                ForEach(Destination.allCases.filter(\.acceptsNewTasks), id: \.self) { item in
+                    phoneContent(for: item)
+                        .tabItem { Label(item.rawValue, systemImage: item.symbol) }
+                        .tag(item)
+                }
+            }
+            .searchable(text: $search, isPresented: $presentingSearch, placement: .navigationBarDrawer, prompt: searchPrompt)
+            .navigationTitle(query.isEmpty ? destination.rawValue : "搜索结果")
+            .navigationBarTitleDisplayMode(destination == .calendar ? .inline : .large)
+            .toolbar {
+                if destination == .calendar && section == .month && query.isEmpty {
+                    ToolbarItem(placement: .topBarLeading) {
+                        CalendarDateButton(day: Binding(get: { calendarDay }, set: { calendarDay = $0; calendarDetailDay = $0 }),
+                                           title: AppStyle.monthLabel(calendarDay))
+                    }
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if !presentingSearch {
+                        Button("搜索", systemImage: "magnifyingglass") { presentingSearch = true }
+                            .labelStyle(.iconOnly)
+                    }
+                    toolsMenu(includesNavigation: true)
+                }
+            }
+            .navigationDestination(for: PhoneRoute.self) { route in
+                switch route {
+                case .archive(let page): phoneArchivePage(page)
+                case .task(let id): phoneTaskDetail(id)
+                }
+            }
+        }.id(model.storePath)
+    }
+
+    private func phoneArchivePage(_ page: Destination) -> some View {
+        let query = archiveSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return phoneTaskCollection(in: page, matching: query)
+            .navigationTitle(query.isEmpty ? page.rawValue : "搜索结果")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $archiveSearch, placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: page == .trash ? "搜索回收站" : "搜索任务标题")
+    }
+
+    @ViewBuilder
+    private func phoneTaskDetail(_ id: UUID) -> some View {
+        if let task = model.tasks.first(where: { $0.id == id }) {
+            TaskDetail(model: model, task: task).id(task.id)
+                .id(model.store.map(ObjectIdentifier.init))
+                .navigationTitle("任务详情").navigationBarTitleDisplayMode(.inline)
+        } else {
+            ContentUnavailableView("任务暂不可用", systemImage: "tray",
+                                   description: Text("请返回列表检查当前账户与同步状态。"))
+        }
+    }
+
+    @ViewBuilder
+    private func phoneContent(for item: Destination) -> some View {
+        if !query.isEmpty {
+            phoneTaskCollection(in: item, matching: query)
+        } else {
+            switch item {
+            case .today:
                 TimelineView(.periodic(from: .now, by: 60)) { context in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 12) {
@@ -535,7 +826,7 @@ struct PrototypeView: View {
                     }
                 }
                 .overlay(alignment: .bottomTrailing) { floatingCapture }
-                .tabItem { Label("今天", systemImage: "sun.max") }.tag(PhoneTab.today)
+            case .calendar:
                 VStack(spacing: 0) {
                     if weekList == nil {
                         Picker("日历视图", selection: Binding(get: { section }, set: { section = $0; calendarDetailDay = nil })) {
@@ -547,66 +838,38 @@ struct PrototypeView: View {
                     if section == .month { calendarDayPanel }
                 }
                 .overlay(alignment: .bottomTrailing) { if section == .month && calendarDetailDay == nil { floatingCapture } }
-                .tabItem { Label("日历", systemImage: "calendar") }.tag(PhoneTab.calendar)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        searchField
-                        if !showTrash { filterPicker }
-                        if !model.loaded {
-                            ProgressView("正在打开任务…").frame(maxWidth: .infinity).padding(.top, 60)
-                        } else if listed.isEmpty {
-                            emptyState
-                        } else {
-                            LazyVStack(spacing: 10) {
-                                ForEach(listed) { task in taskRow(task) }
-                            }
-                        }
-                    }.padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 100)
-                }
-                .background(AppStyle.canvas(colorScheme))
-                .overlay(alignment: .bottomTrailing) { floatingCapture }
-                .tabItem { Label("收集箱", systemImage: "tray") }.tag(PhoneTab.inbox)
+            case .todo:
+                phoneTaskCollection(in: item, matching: query).overlay(alignment: .bottomTrailing) { floatingCapture }
+            case .completed, .trash:
+                EmptyView()
             }
-            .onChange(of: phoneTab) { old, _ in
-                if old == .calendar { weekList = nil }
-                if old == .inbox { search = ""; filter = .unscheduled; showTrash = false; searchFocused = false }
-            }
-            .navigationTitle(phoneTab == .inbox ? (showTrash ? "回收站" : filter == .all ? "全部任务" : filter == .completed ? "已完成" : "收集箱") : phoneTab.rawValue)
-            .navigationBarTitleDisplayMode(phoneTab == .calendar ? .inline : .large)
-            .toolbar {
-                if phoneTab == .calendar && section == .month {
-                    ToolbarItem(placement: .topBarLeading) {
-                        CalendarDateButton(day: Binding(get: { calendarDay }, set: { calendarDay = $0; calendarDetailDay = $0 }),
-                                           title: AppStyle.monthLabel(calendarDay))
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack {
-                        if phoneTab != .inbox {
-                            Button {
-                                showTrash = false; filter = .all; phoneTab = .inbox; searchFocused = true
-                            } label: { Image(systemName: "magnifyingglass") }.accessibilityLabel("搜索全部任务")
-                        }
-                        toolsMenu
-                    }
-                }
-            }
-            .navigationDestination(item: $model.selection) { id in
-                if let task = model.tasks.first(where: { $0.id == id }) {
-                    TaskDetail(model: model, task: task).id(task.id)
-                        .id(model.store.map(ObjectIdentifier.init))
-                        .navigationTitle("任务详情").navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private func phoneTaskCollection(in page: Destination, matching query: String) -> some View {
+        let tasks = collection(in: page, matching: query)
+        let isTodoList = page == .todo && query.isEmpty
+        return ScrollView {
+            LazyVStack(spacing: 10) {
+                if !model.loaded {
+                    ProgressView("正在打开任务…").frame(maxWidth: .infinity).padding(.top, 60)
+                } else if tasks.isEmpty {
+                    Text(collectionEmptyTitle(in: page, matching: query))
+                        .foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 48)
                 } else {
-                    ContentUnavailableView("任务暂不可用", systemImage: "tray",
-                                           description: Text("请返回列表检查当前账户与同步状态。"))
+                    ForEach(tasks) { task in taskRow(task, showUnscheduled: isTodoList) }
                 }
             }
-        }.id(model.storePath)
+            .padding(.horizontal, 20).padding(.top, 12)
+            .padding(.bottom, isTodoList ? 100 : 20)
+        }
+        .background(AppStyle.canvas(colorScheme))
+        .accessibilityIdentifier(query.isEmpty ? "collection-\(page)" : "searchResults")
     }
 
     private var floatingCapture: some View {
         Button {
-            let day: Day? = phoneTab == .today ? Day(date: Date(), timeZone: .current) : phoneTab == .calendar ? calendarDay : nil
+            let day: Day? = destination == .today ? Day(date: Date(), timeZone: .current) : destination == .calendar ? calendarDay : nil
             presentCapture(schedule: day.map { .allDay(start: $0, endExclusive: $0.adding(days: 1)) } ?? .none)
         } label: {
             Image(systemName: hasCaptureDraft ? "square.and.pencil" : "plus")
@@ -627,9 +890,6 @@ struct PrototypeView: View {
         if overview.scheduled.isEmpty && overview.earlier.isEmpty {
             Text(overview.finishedToday.isEmpty ? "今天还没有安排" : "今天的任务都完成了")
                 .foregroundStyle(.secondary)
-            if overview.inboxCount > 0 {
-                Button("查看收集箱 · \(overview.inboxCount) 项") { openCollection(.inbox) }
-            }
         }
         ForEach(overview.scheduled) { todayRow($0, on: today) }
         if !overview.earlier.isEmpty {
@@ -638,11 +898,6 @@ struct PrototypeView: View {
                     ForEach(overview.earlier) { todayRow($0, on: today, earlier: true) }
                 }
             }.accessibilityIdentifier("earlierTasks")
-        }
-        if !overview.finishedToday.isEmpty {
-            DisclosureGroup("已完成 · \(overview.finishedToday.count)", isExpanded: $completedExpanded) {
-                ForEach(overview.finishedToday) { todayRow($0, on: today) }
-            }
         }
     }
 
@@ -664,75 +919,12 @@ struct PrototypeView: View {
             Button("放入本周待安排") { model.perform { try $0.scheduleTask(id: task.id, schedule: .week(start: monday)) } }
         }
         if task.schedule != .none {
-            Button("移到收集箱") { model.perform { try $0.scheduleTask(id: task.id, schedule: .none) } }
+            Button("设为未安排") { model.perform { try $0.scheduleTask(id: task.id, schedule: .none) } }
         }
     }
 
-    private func openCollection(_ target: AppDestination) {
-        TaskWritingEditor.finishEditing()
-        model.selection = nil
-        search = ""
-        earlierExpanded = true
-        #if os(macOS)
-        navigate(target == .today ? .today : .inbox)
-        #else
-        capturing = false; showTrash = false; filter = .unscheduled
-        phoneTab = target == .today ? .today : .inbox
-        #endif
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("搜索任务标题", text: $search).textFieldStyle(.plain).focused($searchFocused)
-                .accessibilityIdentifier("taskSearch")
-            if !search.isEmpty {
-                Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                    .buttonStyle(.plain).accessibilityLabel("清除搜索")
-            }
-        }.padding(11).background(AppStyle.surface(colorScheme), in: RoundedRectangle(cornerRadius: 11))
-    }
-
-    private var filterPicker: some View {
-        Picker("任务筛选", selection: $filter) {
-            ForEach(TaskFilter.allCases, id: \.self) { item in Text(item.rawValue).tag(item) }
-        }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("taskFilter")
-    }
-
-    private var taskList: some View {
-        Group {
-            if !model.loaded {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if listed.isEmpty {
-                emptyState.frame(maxHeight: .infinity)
-            } else {
-                List(selection: $model.selection) {
-                    ForEach(listed) { task in
-                        taskRow(task).tag(task.id).draggable(task.id.uuidString)
-                            .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 3, leading: 0, bottom: 3, trailing: 0))
-                    }
-                }.listStyle(.plain).scrollContentBackground(.hidden)
-            }
-        }.accessibilityIdentifier("taskList")
-    }
-
-    private var emptyState: some View {
-        let heading = !search.isEmpty ? "没有找到任务" : showTrash ? "回收站是空的"
-            : filter == .completed ? "还没有已完成任务" : filter == .unscheduled ? "暂时没有未安排任务" : "收集箱是空的"
-        let hint = !search.isEmpty ? "试试更短的标题关键词。" : showTrash ? "移入回收站的任务会保留在这里。"
-            : filter == .completed ? "完成的任务会出现在这里。" : "想到什么，点 + 先记下来。"
-        return VStack(spacing: 12) {
-            Image(systemName: showTrash ? "trash" : search.isEmpty ? "tray" : "magnifyingglass")
-                .font(.system(size: 32, weight: .light)).foregroundStyle(AppStyle.accentText(colorScheme).opacity(0.65))
-            Text(heading)
-                .font(.headline).multilineTextAlignment(.center)
-            Text(hint)
-                .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-        }.frame(maxWidth: .infinity).padding(.vertical, 54)
-    }
-
-    private func taskRow(_ task: TaskSnapshot) -> some View {
+    #if os(iOS)
+    private func taskRow(_ task: TaskSnapshot, showUnscheduled: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Button {
                 model.toggleCompletion(task)
@@ -740,19 +932,15 @@ struct PrototypeView: View {
                 Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 21, weight: .light))
                     .foregroundStyle(task.isCompleted ? AppStyle.accentText(colorScheme) : Color.secondary.opacity(0.65))
-                    #if os(macOS)
-                    .frame(minWidth: 28, minHeight: 36)
-                    #else
                     .frame(minWidth: 44, minHeight: 44)
-                    #endif
             }.buttonStyle(.plain).disabled(task.deletedAt != nil)
                 .accessibilityLabel(task.isCompleted ? "设为未完成：\(task.title)" : "完成：\(task.title)")
             Button { model.selection = task.id } label: {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(task.title).font(.body.weight(.medium)).foregroundStyle(.primary)
                         .strikethrough(task.isCompleted).lineLimit(2)
-                    if task.schedule != .none {
-                        Text(AppStyle.scheduleLabel(task.schedule)).font(.caption).foregroundStyle(.secondary)
+                    if task.schedule != .none || showUnscheduled {
+                        Text(rowScheduleLabel(for: task)).font(.caption).foregroundStyle(.secondary)
                     }
                     if let body = task.currentNote?.body, !body.isEmpty {
                         Text(body.replacingOccurrences(of: "\n", with: " ")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -771,19 +959,24 @@ struct PrototypeView: View {
                     in: RoundedRectangle(cornerRadius: 14))
         .accessibilityIdentifier("task-\(task.id.uuidString)")
     }
+    #endif
 
-    private var toolsMenu: some View {
+    private func toolsMenu(includesNavigation: Bool = false) -> some View {
         Menu {
             #if os(iOS)
-            Button(showTrash ? "返回收集箱" : "查看回收站", systemImage: showTrash ? "tray" : "trash") {
-                showTrash.toggle()
-                #if os(iOS)
-                phoneTab = .inbox
-                #endif
+            if includesNavigation {
+                ForEach(Destination.allCases.filter { !$0.acceptsNewTasks }, id: \.self) { page in
+                    Button(page.rawValue, systemImage: page.symbol) {
+                        presentingSearch = false
+                        archiveSearch = ""
+                        phoneArchive = page
+                    }
+                }
+                Divider()
+                Button("存储与同步信息", systemImage: "internaldrive") { showingInfo = true }
+                Divider()
             }
             #endif
-            Button("存储与同步信息", systemImage: "internaldrive") { showingInfo = true }
-            Divider()
             Button("导出独立 JSON 备份", systemImage: "square.and.arrow.up") {
                 model.perform { store in document = try ArchiveDocument(data: store.archive().encoded()); exporting = true }
             }.disabled(!model.loaded)
@@ -836,7 +1029,7 @@ struct PrototypeView: View {
                             Text(model.cloudAccountIssue ?? model.status)
                                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             Text(model.cloudSyncEnabled
-                                 ? "关闭后回到本机收集箱。iCloud 中的任务与草稿会保留，再次开启即可访问。"
+                                 ? "关闭后回到本机任务库。iCloud 中的任务与草稿会保留，再次开启即可访问。"
                                  : "开启后进入独立的 iCloud 任务库。已有本机任务与草稿保留在此设备，不会自动上传。")
                                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         } else {
@@ -884,7 +1077,7 @@ struct PrototypeView: View {
                     HStack {
                         Text("数据与诊断").font(.headline)
                         Spacer()
-                        toolsMenu
+                        toolsMenu()
                     }
                     #if os(macOS)
                     Button("小组件布局预览", systemImage: "rectangle.3.group") { showingWidgets = true }
@@ -912,6 +1105,7 @@ struct PrototypeView: View {
         #endif
     }
 
+    #if os(iOS)
     @ViewBuilder
     private var calendarDayPanel: some View {
         if let day = calendarDetailDay {
@@ -921,22 +1115,34 @@ struct PrototypeView: View {
                 .background(AppStyle.surface(colorScheme))
         }
     }
+    #endif
 
     @ViewBuilder
     private var plannerContent: some View {
+        #if os(macOS)
+        switch section {
+        case .week:
+            WeekView(model: model, selectedDay: $calendarDay, create: { beginCapture(day: $0) },
+                     inspectDay: { _ in calendarDrawer = .day })
+        case .month:
+            MonthView(model: model, selectedDay: $calendarDay, create: { beginCapture(day: $0) },
+                      inspectDay: { _ in calendarDrawer = .day })
+        }
+        #else
         if let weekList {
             weekTaskList(weekList)
         } else {
             switch section {
             case .week: WeekView(model: model, selectedDay: $calendarDay, create: { beginCapture(day: $0) }, createWeek: {
-                captureSession.plan = ScheduleForm(schedule: .week(start: $0.weekStart ?? $0))
-                presentCapture(schedule: captureSession.plan.schedule)
+                presentCapture(schedule: .week(start: $0.weekStart ?? $0))
             }, inspectDay: { calendarDetailDay = $0 })
             case .month: MonthView(model: model, selectedDay: $calendarDay, create: { beginCapture(day: $0) }, inspectDay: { calendarDetailDay = $0 })
             }
         }
+        #endif
     }
 
+    #if os(iOS)
     private func weekTaskList(_ list: WeekTaskList) -> some View {
         let tasks = list.tasks(from: model.active, weekStart: calendarDay, timeZone: .current)
         let today = Day(date: Date(), timeZone: .current)
@@ -947,14 +1153,12 @@ struct PrototypeView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(list.title).font(.title2.bold())
                     if model.loaded { Text("\(tasks.count)").foregroundStyle(.secondary) }
-                    #if os(iOS)
                     if list == .pending && model.loaded {
                         Spacer()
                         Button("加入本周", systemImage: "plus") {
                             presentCapture(schedule: .week(start: calendarDay))
                         }
                     }
-                    #endif
                 }
                 Text(list == .previousWeeks ? "\(AppStyle.dayLabel(calendarDay)) 之前" : AppStyle.scheduleLabel(.week(start: calendarDay)))
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -973,19 +1177,19 @@ struct PrototypeView: View {
         }
         .accessibilityIdentifier("week-list-\(list.rawValue)")
     }
+    #endif
 
     private func beginCapture(day: Day? = nil) {
-        if let day {
-            captureSession.plan = ScheduleForm(schedule: .allDay(start: day, endExclusive: day.addingIfPossible(days: 1) ?? day))
-        }
         presentCapture(schedule: day.map { .allDay(start: $0, endExclusive: $0.addingIfPossible(days: 1) ?? $0) } ?? .none)
     }
 
     private func presentCapture(schedule: TaskSchedule) {
-        captureSession.begin(schedule: schedule)
         #if os(macOS)
         TaskWritingEditor.finishEditing()
         quickEntryFocused = false
+        #endif
+        captureSession.begin(schedule: schedule)
+        #if os(macOS)
         dismissWindow(id: "capture")
         model.selection = nil
         captureSession.mainWindowID = mainWindowID
@@ -996,7 +1200,7 @@ struct PrototypeView: View {
 
     private func saveCapture() {
         if captureSession.save(using: model) {
-            capturing = false; showTrash = false; search = ""
+            capturing = false; search = ""
         }
     }
 
@@ -1008,40 +1212,37 @@ struct PrototypeView: View {
         capturing = false
         #endif
         switch destination {
-        case .today, .inbox: openCollection(destination)
+        case .today:
+            earlierExpanded = true
+            navigate(.today)
+        case .todo:
+            navigate(.todo)
         case .task(let id):
-            #if os(macOS)
-            TaskWritingEditor.finishEditing()
-            captureSession.mainWindowID = nil
-            weekList = nil
-            self.destination = .all
-            search = ""
-            #endif
+            navigate(.todo)
             model.openTask(id: id)
         case .calendar(let day, let view):
             openCalendar(day: day, view: view)
         case .weekList(let monday, let list):
             openCalendar(day: monday, view: .week)
+            #if os(macOS)
+            calendarDrawer = .week(list)
+            #else
             weekList = list
+            #endif
         case .capture(let schedule):
             presentCapture(schedule: schedule)
         }
     }
 
     private func openCalendar(day: Day, view: CalendarPresentation) {
-        TaskWritingEditor.finishEditing()
-        #if os(macOS)
-        captureSession.mainWindowID = nil
-        destination = .calendar
-        search = ""
-        #else
-        phoneTab = .calendar
-        #endif
-        weekList = nil
         calendarDay = day
         section = view == .month ? .month : .week
+        navigate(.calendar)
+        #if os(macOS)
+        calendarDrawer = view == .week ? nil : .day
+        #else
         calendarDetailDay = view == .week ? nil : day
-        model.selection = nil
+        #endif
     }
 
 }
@@ -1054,6 +1255,7 @@ struct CaptureSheet: View {
     let cancel: () -> Void
     let save: () -> Void
     var embedded = false
+    var outsideDismiss: (() -> Bool)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingDate = false
 
@@ -1063,11 +1265,15 @@ struct CaptureSheet: View {
                 Text("添加任务").font(.headline)
                 Spacer()
                 Button { TaskWritingEditor.finishEditing(); cancel() } label: { Image(systemName: "xmark") }
-                    .buttonStyle(.plain).accessibilityLabel("收起并保留草稿").keyboardShortcut(.cancelAction)
+                    .frame(width: 28, height: 28)
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).help("收起并保留草稿")
+                    .accessibilityLabel("收起并保留草稿")
+                    .keyboardShortcut(outsideDismiss == nil ? .cancelAction : nil)
             }.padding(.horizontal, 20).padding(.vertical, 16)
-            ScrollView {
+            WorkspaceScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    TaskWritingEditor(content: $content, autofocus: true, editable: loaded, minimumHeight: 100)
+                    TaskWritingEditor(content: $content, autofocus: true, editable: loaded, minimumHeight: 100,
+                                      placeholder: "任务标题")
                     Divider()
                     Button { TaskWritingEditor.finishEditing(); showingDate = true } label: {
                         HStack(spacing: 10) {
@@ -1102,10 +1308,15 @@ struct CaptureSheet: View {
                     .accessibilityIdentifier("captureSave").keyboardShortcut(.return, modifiers: .command)
             }.padding(20)
         }
-        .background(AppStyle.canvas(colorScheme))
+        .background(embedded ? Color.clear : AppStyle.canvas(colorScheme))
         .tint(AppStyle.accentText(colorScheme))
         .environment(\.locale, Locale(identifier: "zh_CN"))
         #if os(macOS)
+        .background {
+            if let outsideDismiss {
+                InspectorDismissal(enabled: !showingDate, dismiss: outsideDismiss)
+            }
+        }
         .frame(minWidth: embedded ? 0 : 380, maxWidth: embedded ? .infinity : 420,
                minHeight: embedded ? 0 : 380, maxHeight: embedded ? .infinity : 480)
         #else
@@ -1117,7 +1328,7 @@ struct CaptureSheet: View {
 struct TaskDetail: View {
     @ObservedObject var model: PrototypeModel
     let task: TaskSnapshot
-    var compact = false
+    var inDrawer = false
     private let editingStore: TaskStore?
     @Environment(\.colorScheme) private var colorScheme
     @State private var writing = TaskWriting()
@@ -1136,10 +1347,10 @@ struct TaskDetail: View {
     @State private var draftStatus = ""
     @State private var otherDrafts: [LocalDraft] = []
 
-    init(model: PrototypeModel, task: TaskSnapshot, compact: Bool = false) {
+    init(model: PrototypeModel, task: TaskSnapshot, inDrawer: Bool = false) {
         self.model = model
         self.task = task
-        self.compact = compact
+        self.inDrawer = inDrawer
         editingStore = model.store
         _writing = State(initialValue: TaskWriting(title: task.title, body: task.currentNote?.body ?? "", formatting: task.currentNote?.formatting))
         _parents = State(initialValue: task.currentNote.map { [$0.id] } ?? [])
@@ -1149,7 +1360,18 @@ struct TaskDetail: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
+            #if os(macOS)
+            if inDrawer {
+                HStack {
+                    Spacer()
+                    Button { closeDetail() } label: {
+                        Image(systemName: "xmark").frame(width: 28, height: 28)
+                    }.buttonStyle(.borderless).foregroundStyle(.secondary).help("收起任务详情")
+                        .accessibilityLabel("收起任务详情").accessibilityIdentifier("closeTaskDetail")
+                }.padding(.horizontal, 16).padding(.top, 10)
+            }
+            #endif
+            WorkspaceScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     TaskWritingEditor(content: Binding(get: { writing }, set: {
                         if needsDraftTitleChoice && TaskStore.titleChange($0.title, from: writing.title) != nil {
@@ -1191,7 +1413,7 @@ struct TaskDetail: View {
                         Text("恢复任务后可以继续编辑。").font(.caption).foregroundStyle(.secondary)
                         Button("恢复任务") { model.perform { try $0.restoreTask(id: task.id) } }.buttonStyle(.bordered)
                     }
-                }.padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 20)
+                }.padding(.horizontal, 20).padding(.top, inDrawer ? 0 : 16).padding(.bottom, 20)
             }.accessibilityIdentifier("detail-\(task.id.uuidString)")
             Divider().padding(.horizontal, 20)
             if contentChanged && task.deletedAt == nil {
@@ -1255,18 +1477,12 @@ struct TaskDetail: View {
                 #endif
                 .fixedSize().help("版本记录与任务操作").accessibilityLabel("版本记录与任务操作")
                     .accessibilityIdentifier("taskMore")
-                #if os(macOS)
-                if compact {
-                    Button { closeDetail() } label: { Image(systemName: "chevron.right").frame(width: 28, height: 28) }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).help("返回任务列表")
-                        .accessibilityLabel("返回任务列表").accessibilityIdentifier("closeTaskDetail")
-                }
-                #endif
             }.padding(.horizontal, 20).padding(.vertical, 12)
         }
-        .background(AppStyle.canvas(colorScheme))
+        .background(inDrawer ? Color.clear : AppStyle.canvas(colorScheme))
         #if os(macOS)
-        .background(InspectorDismissal(handlesEscape: !showingSchedule && !showingHistory && !showingReminderHandoff) { closeDetail() })
+        .background(InspectorDismissal(enabled: model.selection == task.id && !showingSchedule && !showingHistory
+                                        && !showingReminderHandoff && !showingDraftTitleChoice) { closeDetail() })
         .sheet(isPresented: $showingReminderHandoff) {
             MacReminderHandoffView(reminders: model.reminders, task: task, isCurrent: { hasCurrentStore })
         }
@@ -1395,6 +1611,7 @@ struct TaskDetail: View {
 
     @discardableResult
     private func closeDetail() -> Bool {
+        guard model.selection == task.id else { return true }
         TaskWritingEditor.finishEditing()
         guard persistEditorDraft() else { return false }
         model.selection = nil
@@ -1426,16 +1643,16 @@ struct TaskDetail: View {
 #if os(macOS)
 /// Observe clicks without placing a transparent hit target over the workspace.
 private struct InspectorDismissal: NSViewRepresentable {
-    let handlesEscape: Bool
+    let enabled: Bool
     let dismiss: () -> Bool
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { [weak view, coordinator = context.coordinator] event in
-            guard let view, let window = view.window, event.window === window else { return event }
+            guard coordinator.enabled, let view, let window = view.window, event.window === window else { return event }
             if event.type == .keyDown {
-                guard coordinator.handlesEscape, event.keyCode == 53,
-                      (window.firstResponder as? NSTextView)?.hasMarkedText() != true else { return event }
+                guard event.keyCode == 53,
+                      (window.firstResponder as? NSTextInputClient)?.hasMarkedText() != true else { return event }
                 _ = coordinator.dismiss()
                 return nil
             }
@@ -1447,9 +1664,9 @@ private struct InspectorDismissal: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.dismiss = dismiss
-        context.coordinator.handlesEscape = handlesEscape
+        context.coordinator.enabled = enabled
     }
-    func makeCoordinator() -> Coordinator { Coordinator(handlesEscape: handlesEscape, dismiss: dismiss) }
+    func makeCoordinator() -> Coordinator { Coordinator(enabled: enabled, dismiss: dismiss) }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
         if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor) }
@@ -1457,10 +1674,10 @@ private struct InspectorDismissal: NSViewRepresentable {
 
     final class Coordinator {
         var dismiss: () -> Bool
-        var handlesEscape: Bool
+        var enabled: Bool
         var monitor: Any?
-        init(handlesEscape: Bool, dismiss: @escaping () -> Bool) {
-            self.handlesEscape = handlesEscape
+        init(enabled: Bool, dismiss: @escaping () -> Bool) {
+            self.enabled = enabled
             self.dismiss = dismiss
         }
     }

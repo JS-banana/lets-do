@@ -13,7 +13,7 @@ struct MacReminderImportView: View {
                 Spacer()
                 Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
             }
-            Text("所选待办的标题和备注会加入收集箱，原提醒和截止日期保留在提醒事项中。")
+            Text("导入的任务会出现在「待办」，可在这里安排日期。原提醒和截止日期保留在提醒事项中。")
                 .foregroundStyle(.secondary)
             MacReminderListPicker(reminders: reminders)
             if reminders.authorized, reminders.selectedListID != nil {
@@ -37,8 +37,8 @@ struct MacReminderImportView: View {
                                         }
                                     }
                                     Spacer()
-                                    Button("加入收集箱") { reminders.importCandidate(item) }
-                                        .accessibilityLabel("将\(item.title)加入收集箱")
+                                    Button("导入") { reminders.importCandidate(item) }
+                                        .accessibilityLabel("导入\(item.title)")
                                 }
                                 Divider()
                             }

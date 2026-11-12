@@ -7,6 +7,10 @@ struct MonthView: View {
     let create: (Day) -> Void
     let inspectDay: (Day) -> Void
     @State private var draggingTaskID: UUID?
+    #if os(macOS)
+    @State private var hoveredDay: Day?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    #endif
 
     private var month: Day { Self.monthContaining(selectedDay) }
 
@@ -36,10 +40,6 @@ struct MonthView: View {
         Day(date: Date(), timeZone: .current)
     }
 
-    private var monthTitle: String {
-        AppStyle.monthLabel(month)
-    }
-
     var body: some View {
         Group {
         #if os(macOS)
@@ -47,55 +47,6 @@ struct MonthView: View {
         #else
         phoneBody
         #endif
-        }
-    }
-
-    private var monthHeader: some View {
-        HStack(spacing: 8) {
-            CalendarDateButton(day: Binding(get: { selectedDay }, set: { selectedDay = $0; inspectDay($0) }), title: monthTitle)
-                .accessibilityIdentifier("calendarMonth")
-
-            Spacer(minLength: 12)
-
-            Button { create(selectedDay) } label: { Image(systemName: "plus").frame(width: 32, height: 32) }
-                .buttonStyle(.borderless).accessibilityLabel("在所选日期新建任务")
-
-            Divider().frame(height: 18).padding(.horizontal, 4)
-
-            Button {
-                shiftMonth(-1)
-            } label: {
-                Image(systemName: "chevron.left")
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("上月")
-            .accessibilityHint("显示上一个月")
-            .help("显示上一个月")
-            .accessibilityIdentifier("previousMonth")
-
-            Button {
-                selectedDay = today
-                inspectDay(today)
-            } label: { Text("今天").frame(width: 44, height: 32) }
-            .buttonStyle(.borderless)
-            .tint(AppStyle.accentText(colorScheme))
-            .accessibilityLabel("今天")
-            .accessibilityHint("回到今天并显示当天任务")
-            .help("回到今天")
-            .accessibilityIdentifier("todayMonth")
-
-            Button {
-                shiftMonth(1)
-            } label: {
-                Image(systemName: "chevron.right")
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("下月")
-            .accessibilityHint("显示下一个月")
-            .help("显示下一个月")
-            .accessibilityIdentifier("nextMonth")
         }
     }
 
@@ -116,15 +67,14 @@ struct MonthView: View {
     #if os(macOS)
     private var macBody: some View {
         let currentLayout = layout
-        return GeometryReader { geometry in
-            let rowHeight = max(104, min(124, (geometry.size.height - 240) / CGFloat(currentLayout.days.count / 7)))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    monthHeader
-                    weekdayHeader
-
+        return VStack(spacing: 0) {
+            weekdayHeader.padding(.horizontal, 16).padding(.vertical, 6)
+            GeometryReader { geometry in
+                let weekCount = currentLayout.days.count / 7
+                let rowHeight = max(96, min(132, (geometry.size.height - 16) / CGFloat(weekCount)))
+                WorkspaceScrollView {
                     VStack(spacing: 0) {
-                        ForEach(0..<(currentLayout.days.count / 7), id: \.self) { week in
+                        ForEach(0..<weekCount, id: \.self) { week in
                             weekRow(layout: currentLayout, week: week, rowHeight: rowHeight)
                         }
                     }
@@ -134,13 +84,11 @@ struct MonthView: View {
                     .overlay {
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(Color.secondary.opacity(0.16), lineWidth: 0.5)
+                            .allowsHitTesting(false)
                     }
-
-                    Text("拖动日历条可调整开始日期，任务跨度保持不变。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
                 }
-                .padding(16)
             }
         }
         .background(AppStyle.canvas(colorScheme).ignoresSafeArea())
@@ -161,8 +109,9 @@ struct MonthView: View {
                 rowHeight: rowHeight
             )
             .dropDestination(for: String.self) { values, point in
-                guard let value = values.first,
-                      let id = UUID(uuidString: value) else { return false }
+                guard width > 0,
+                      let value = values.first, let id = UUID(uuidString: value),
+                      model.active.contains(where: { $0.id == id }) else { return false }
                 let column = min(6, max(0, Int(point.x / width)))
                 selectedDay = days[column]
                 model.move(id: id, to: days[column])
@@ -277,21 +226,23 @@ struct MonthView: View {
             } label: {
                 Text(String(Int(day.rawValue.suffix(2))!))
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(isSelected ? Color.white : (isCurrentMonth ? Color.primary : Color.secondary))
+                    .foregroundStyle(isToday ? Color.white : (isCurrentMonth ? Color.primary : Color.secondary))
                     .frame(width: 24, height: 24)
                     .background {
-                        if isSelected {
+                        if isToday {
                             Circle().fill(AppStyle.accent)
-                        } else if isToday {
-                            Circle().stroke(AppStyle.accentText(colorScheme), lineWidth: 1.5)
+                        } else if isSelected {
+                            Circle().strokeBorder(AppStyle.accentText(colorScheme).opacity(0.6), lineWidth: 1)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(6)
             }
             .buttonStyle(.plain)
+            .onHover { updateHover(for: day, inside: $0) }
             .accessibilityLabel(dayAccessibilityLabel(day, isToday: isToday, isSelected: isSelected))
             .accessibilityHint("选择这一天并查看当天任务")
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
             .help("选择\(AppStyle.dayLabel(day))")
             .accessibilityIdentifier("day-\(day.rawValue)")
             .contextMenu { Button("在这一天新建任务") { create(day) } }
@@ -315,14 +266,22 @@ struct MonthView: View {
         }
         .frame(width: width, height: rowHeight)
         .background {
-            Button { selectedDay = day; create(day) } label: {
-                Rectangle().fill(isCurrentMonth ? AppStyle.surface(colorScheme) : Color.secondary.opacity(0.045))
-                    .contentShape(Rectangle())
-            }.buttonStyle(.plain)
-                .accessibilityLabel("在\(AppStyle.dayLabel(day))添加任务")
-                .accessibilityIdentifier("month-blank-\(day.rawValue)")
+            MacCalendarDayBackground(day: day,
+                fill: hoveredDay == day ? MacCalendarDayBackground.highlight(in: colorScheme)
+                    : (isCurrentMonth ? AppStyle.surface(colorScheme) : Color.secondary.opacity(0.045)),
+                identifier: "month-blank-\(day.rawValue)",
+                hover: { updateHover(for: day, inside: $0) }) {
+                selectedDay = day
+                create(day)
+            }
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hoveredDay == day)
         .overlay { Rectangle().stroke(Color.secondary.opacity(0.20), lineWidth: 0.5).allowsHitTesting(false) }
+    }
+
+    private func updateHover(for day: Day, inside: Bool) {
+        if inside { hoveredDay = day }
+        else if hoveredDay == day { hoveredDay = nil }
     }
 
     #endif
@@ -418,10 +377,15 @@ struct MonthView: View {
     }
 
     private func shiftMonth(_ offset: Int) {
+        if let day = Self.shiftedMonth(from: selectedDay, by: offset) { selectedDay = day }
+    }
+
+    static func shiftedMonth(from day: Day, by offset: Int) -> Day? {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
-        guard let date = calendar.date(byAdding: .month, value: offset, to: month.date(in: .current)) else { return }
-        selectedDay = Self.monthContaining(Day(date: date, timeZone: .current))
+        guard let date = calendar.date(byAdding: .month, value: offset,
+                                       to: monthContaining(day).date(in: .current)) else { return nil }
+        return monthContaining(Day(date: date, timeZone: .current))
     }
 
     private static func monthContaining(_ day: Day) -> Day {

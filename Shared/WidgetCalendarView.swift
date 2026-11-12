@@ -94,65 +94,54 @@ struct WidgetCalendarView: View {
 
     @ViewBuilder
     private var weekMediumBody: some View {
-        if let overview = WeekTaskOverview.make(today: anchorDay, tasks: tasks, timeZone: .current) {
-            VStack(alignment: .leading, spacing: 2) {
+        if let overview = WeekTaskOverview.make(
+            today: anchorDay, tasks: tasks, timeZone: .current, rowLimit: message.isEmpty ? 4 : 3
+        ) {
+            let groups = Dictionary(grouping: overview.rows, by: \.day)
+            let otherDays = overview.days.filter { $0.unfinishedCount > 0 && groups[$0.day] == nil }
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Link(destination: calendarURL(for: overview.weekStart, view: .week)) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text("本周").font(.system(size: 16, weight: .semibold))
-                            Text("\(compactDayLabel(overview.weekStart)) – \(compactDayLabel(overview.weekStart.adding(days: 6))) · 待办 \(overview.unfinishedCount)")
-                                .font(.system(size: 11)).foregroundStyle(.secondary)
-                        }
+                        Text("本周").font(.system(size: 16, weight: .semibold))
                     }
                     .buttonStyle(.plain)
-                    .lineLimit(1)
                     .accessibilityLabel("本周计划，\(AppStyle.dayLabel(overview.weekStart)) 起，\(overview.unfinishedCount) 项待办，打开周历")
-                    Spacer(minLength: 4)
-                    previousWeeksLink
+                    Spacer(minLength: 8)
+                    Text("\(compactDayLabel(overview.weekStart)) – \(compactDayLabel(overview.weekStart.adding(days: 6)))")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                HStack(spacing: 2) {
-                    ForEach(overview.days) { entry in
-                        let today = entry.day == anchorDay
-                        Link(destination: calendarURL(for: entry.day, view: .agenda)) {
-                            VStack(spacing: 0) {
-                                Text(weekdayLabel(entry.day)).font(.system(size: 10))
-                                Text("\(entry.unfinishedCount)").font(.system(size: 12, weight: .semibold))
-                                    .monospacedDigit()
-                            }
-                            .foregroundStyle(today ? accentForeground : entry.unfinishedCount > 0 ? Color.primary : Color.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 28)
-                            .background(today ? accentForeground.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(today ? "今天，" : "")\(AppStyle.dayLabel(entry.day))，\(weekdayLabel(entry.day))，\(entry.unfinishedCount) 项未完成，查看当天任务")
-                    }
-                }
+                .frame(minHeight: 20)
+
                 if overview.rows.isEmpty {
                     Text(overview.completedWeekCount > 0 ? "本周任务已完成" : "本周暂无安排")
                         .font(.subheadline).foregroundStyle(.secondary)
                 } else {
-                    ForEach(overview.rows) { row in
-                        HStack(spacing: 6) {
-                            Text(weekRowLabel(row))
-                                .font(.system(size: 11))
-                                .foregroundStyle(row.day == anchorDay ? accentForeground : Color.secondary)
-                                .lineLimit(1)
-                                .frame(width: 68, alignment: .leading)
-                                .accessibilityLabel(AppStyle.scheduleLabel(row.task.schedule))
-                            completionButton(row.task)
-                            taskTitleLink(row.task, lineLimit: 1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(overview.days) { entry in
+                            if let rows = groups[entry.day] {
+                                weekMediumGroup(day: entry.day, rows: rows, count: entry.unfinishedCount, unshown: entry.unshownCount)
+                            }
                         }
-                        .frame(minHeight: 17)
+                        if let rows = groups[nil] {
+                            weekMediumGroup(day: nil, rows: rows, count: overview.pendingCount, unshown: overview.pendingCount - rows.count)
+                        }
                     }
                 }
+
+                if !otherDays.isEmpty { weekMediumOtherDays(otherDays, weekStart: overview.weekStart) }
+
                 Spacer(minLength: 0)
-                HStack(spacing: 6) {
-                    pendingWeekLink(count: overview.pendingCount)
-                    Spacer(minLength: 0)
-                    quickCaptureLink
+                HStack(spacing: 8) {
+                    previousWeeksLink
+                    if groups[nil] == nil {
+                        pendingWeekLink(count: overview.pendingCount)
+                    }
+                    Spacer(minLength: 4)
+                    quickCaptureLink.fixedSize()
                 }
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11))
+                .lineLimit(1)
                 messageView
             }
             .accessibilityIdentifier("weekIndexWidget")
@@ -161,16 +150,80 @@ struct WidgetCalendarView: View {
         }
     }
 
-    private func weekRowLabel(_ row: WeekTaskOverview.Row) -> String {
-        guard let day = row.day else { return "待安排" }
-        if let range = row.task.schedule.dayRange(in: .current),
-           let last = range.upperBound.addingIfPossible(days: -1), last != range.lowerBound {
-            func label(_ endpoint: Day) -> String {
-                endpoint.weekStart == weekStart ? weekdayLabel(endpoint) : compactDayLabel(endpoint)
+    private func weekMediumOtherDays(_ days: [WeekTaskOverview.DayCount], weekStart: Day) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                ForEach(days) { entry in
+                    let isToday = entry.day == anchorDay
+                    let title = isToday ? "今天" : weekdayLabel(entry.day)
+                    Link(destination: calendarURL(for: entry.day, view: .agenda)) {
+                        Text("\(title) \(entry.unfinishedCount)")
+                            .foregroundStyle(isToday ? accentForeground : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(title)，\(AppStyle.dayLabel(entry.day))有\(entry.unfinishedCount)项未完成，查看当天任务")
+                }
             }
-            return "\(label(range.lowerBound))–\(label(last))"
+            .fixedSize(horizontal: true, vertical: false)
+
+            Link("另有 \(days.count) 天待办", destination: calendarURL(for: weekStart, view: .week))
+                .buttonStyle(.plain)
+                .foregroundStyle(accentForeground)
+                .accessibilityHint("查看完整周历")
         }
-        return day == anchorDay ? "今天" : weekdayLabel(day)
+        .font(.system(size: 11))
+        .lineLimit(1)
+    }
+
+    private func weekMediumGroup(day: Day?, rows: [WeekTaskOverview.Row], count: Int, unshown: Int) -> some View {
+        let isToday = day == anchorDay
+        let title = day.map { isToday ? "今天" : weekdayLabel($0) } ?? "待安排"
+        let destination = day.map { calendarURL(for: $0, view: .agenda) }
+            ?? AppDestination.weekList(weekStart, .pending).url
+        let dateLabel = day.map { "\(title)，\(AppStyle.dayLabel($0))" } ?? "本周待安排"
+        let more = unshown > 0 ? "，还有\(unshown)项未在摘要显示" : ""
+        return HStack(alignment: .top, spacing: 6) {
+            Link(destination: destination) {
+                HStack(spacing: 3) {
+                    Text(title).font(.system(size: isToday ? 13 : 11, weight: isToday ? .semibold : .regular))
+                    if unshown > 0 {
+                        Text("+\(unshown)").font(.system(size: 11))
+                    }
+                }
+                .foregroundStyle(isToday ? accentForeground : Color.secondary)
+                .lineLimit(1)
+                .frame(width: 62, height: 18, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(dateLabel)，\(count)项未完成\(more)，查看完整清单")
+
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(rows) { row in
+                    HStack(spacing: 6) {
+                        completionButton(row.task)
+                        taskTitleLink(row.task, lineLimit: 1)
+                            .accessibilityLabel("\(taskTitle(row.task))，\(AppStyle.scheduleLabel(row.task.schedule))")
+                        if let span = weekSpanLabel(row.task.schedule) {
+                            Text(span)
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                                .lineLimit(1).fixedSize()
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .frame(minHeight: 18)
+                }
+            }
+        }
+    }
+
+    private func weekSpanLabel(_ schedule: TaskSchedule) -> String? {
+        guard let range = schedule.dayRange(in: .current),
+              let last = range.upperBound.addingIfPossible(days: -1), last != range.lowerBound else { return nil }
+        func label(_ endpoint: Day) -> String {
+            endpoint.weekStart == weekStart ? weekdayLabel(endpoint) : compactDayLabel(endpoint)
+        }
+        return "\(label(range.lowerBound))–\(label(last))"
     }
 
     private var weekExtraLargeBody: some View {
@@ -589,7 +642,7 @@ struct WidgetCalendarView: View {
             .accessibilityLabel("查看今天和此前未完成的任务")
             todayRows(overview, limit: family == .systemSmall ? 1 : 2)
             Spacer(minLength: 0)
-            captureFooter(inboxCount: overview.inboxCount)
+            widgetFooter(leading: Link("待办", destination: AppDestination.todo.url), trailing: quickCaptureLink)
             messageView
         }
         .widgetURL(AppDestination.today.url)
@@ -644,15 +697,6 @@ struct WidgetCalendarView: View {
                let task = tasks(on: day).first(where: { !$0.isCompleted }) { return (day, task) }
         }
         return nil
-    }
-
-    private func captureFooter(inboxCount: Int) -> some View {
-        widgetFooter(leading: Group {
-            if inboxCount > 0 {
-                Link("收集箱 \(inboxCount)", destination: AppDestination.inbox.url)
-                    .accessibilityLabel("查看收集箱里的\(inboxCount)项未安排任务")
-            }
-        }, trailing: quickCaptureLink)
     }
 
     private var todayAgenda: some View {
