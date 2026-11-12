@@ -13,18 +13,16 @@ struct TodayTasks<Item: ScheduledTask> {
     let scheduled: [Item]
     let earlier: [Item]
     let finishedToday: [Item]
-    let inboxCount: Int
 
     init(_ items: [Item], on day: Day, timeZone: TimeZone) {
         var scheduled: [Item] = []
         var earlier: [(item: Item, end: Day)] = []
         var finished: [Item] = []
-        var inboxCount = 0
         var seen: Set<UUID> = []
         for item in items where seen.insert(item.id).inserted {
             switch item.schedule {
             case .none:
-                if !item.isCompleted { inboxCount += 1 }
+                continue
             case .week(let start):
                 if !item.isCompleted, (try? item.schedule.validated()) != nil,
                    let end = start.addingIfPossible(days: 7), end <= day {
@@ -54,7 +52,6 @@ struct TodayTasks<Item: ScheduledTask> {
         self.earlier = earlier.sorted { a, b in
             a.end == b.end ? a.item.id.uuidString < b.item.id.uuidString : a.end > b.end
         }.map(\.item)
-        self.inboxCount = inboxCount
     }
 
     /// On a small widget, keep one actionable carry-over. On medium, show both groups.

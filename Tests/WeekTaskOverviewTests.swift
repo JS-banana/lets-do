@@ -72,12 +72,13 @@ final class WeekTaskOverviewTests: XCTestCase {
             allDay(5, start: thursday, endExclusive: monday.adding(days: 7), completed: true),
             allDay(6, start: monday.adding(days: -3), endExclusive: monday.adding(days: -2)),
             pending(7, weekStart: monday.adding(days: -7)),
-            CalendarTask(id: taskID(8), title: "收集箱", schedule: .none, isCompleted: false)
+            CalendarTask(id: taskID(8), title: "未安排", schedule: .none, isCompleted: false)
         ]
 
         let week = try XCTUnwrap(WeekTaskOverview.make(today: wednesday, tasks: tasks, timeZone: gmt))
         XCTAssertEqual(week.days.map(\.day), (0..<7).map { monday.adding(days: $0) })
         XCTAssertEqual(week.days.map(\.unfinishedCount), [1, 2, 1, 1, 1, 0, 0])
+        XCTAssertTrue(week.days.allSatisfy { $0.unshownCount == 0 })
         XCTAssertEqual(week.unfinishedCount, 4)
         XCTAssertEqual(week.pendingCount, 1)
         XCTAssertEqual(week.completedWeekCount, 1)
@@ -144,6 +145,12 @@ final class WeekTaskOverviewTests: XCTestCase {
         let pastOnly = try XCTUnwrap(WeekTaskOverview.make(today: sunday, tasks: dated, timeZone: gmt))
         XCTAssertEqual(pastOnly.rows.map(\.id), [taskID(1), taskID(2), taskID(3)])
         XCTAssertEqual(pastOnly.days.first?.unfinishedCount, 5)
+        XCTAssertEqual(pastOnly.days.first?.unshownCount, 2)
+
+        let fourRows = try XCTUnwrap(WeekTaskOverview.make(today: sunday, tasks: dated, timeZone: gmt, rowLimit: 4))
+        XCTAssertEqual(fourRows.rows.map(\.id), [taskID(1), taskID(2), taskID(3), taskID(4)])
+        XCTAssertEqual(fourRows.days.first?.unshownCount, 1)
+        XCTAssertEqual(fourRows.unfinishedCount, pastOnly.unfinishedCount)
 
         let mixed = try XCTUnwrap(WeekTaskOverview.make(today: sunday, tasks: dated + weekOnly, timeZone: gmt))
         XCTAssertEqual(mixed.rows.map(\.id), [taskID(1), taskID(2), taskID(6)])
@@ -236,22 +243,52 @@ final class WeekTaskOverviewTests: XCTestCase {
 
     #if os(macOS)
     @MainActor
-    func testMediumWeekFitsMacPreviewWithThreeTitlesAndBothListLinks() throws {
+    func testMediumWeekFitsMacPreviewWithOverflowAndFooterLinks() throws {
         let monday = try day("2026-11-09")
         let today = monday.adding(days: 2)
+        let thursday = monday.adding(days: 3)
         let friday = monday.adding(days: 4)
-        let tasks = [allDay(1, start: monday, endExclusive: monday.adding(days: 1)),
-                     allDay(2, start: today, endExclusive: today.adding(days: 1)),
-                     allDay(3, start: friday, endExclusive: friday.adding(days: 1)),
-                     pending(4, weekStart: monday), pending(5, weekStart: monday.adding(days: -7))]
-        let widget = WidgetCalendarView(date: today.date(in: .current), tasks: tasks, mode: .week,
-                                        family: .systemMedium, message: "本机完成 · 打开应用后同步", complete: { _ in })
-            .frame(width: 344)
-            .fixedSize(horizontal: false, vertical: true)
-        let image = try XCTUnwrap(ImageRenderer(content: widget).nsImage)
-        XCTAssertEqual(image.size.width, 344, accuracy: 1)
-        XCTAssertGreaterThan(image.size.height, 0)
-        XCTAssertLessThanOrEqual(image.size.height, 164)
+        let examples: [(String, Day)] = [
+            ("梳理本周交付范围", monday),
+            ("核对项目说明和所有需要补充的交接材料及 Accessibility Review 反馈", monday),
+            ("补充未展示的周一任务", monday),
+            ("确认界面方案", today),
+            ("整理当天评审意见", today),
+            ("回顾用户反馈", thursday),
+            ("检查下周安排", friday)
+        ]
+        let tasks = examples.enumerated().map { index, example in
+            CalendarTask(id: taskID(index + 1), title: example.0,
+                         schedule: .singleDay(example.1), isCompleted: false)
+        } + [pending(8, weekStart: monday.adding(days: -7))]
+        let weekOnly = CalendarTask(id: taskID(9), title: "整理待确认的事项",
+                                    schedule: .week(start: monday), isCompleted: false)
+        let spanning = CalendarTask(id: taskID(0), title: "准备下一轮评审的示例、材料和需要同步的决定",
+                                    schedule: .allDay(start: monday.adding(days: 1), endExclusive: friday.adding(days: 1)),
+                                    isCompleted: false)
+        let variants: [(String, [CalendarTask], String, ColorScheme)] = [
+            ("week-medium-light", tasks, "", .light),
+            ("week-medium-dark-sync", tasks + [weekOnly], "本机完成 · 打开应用后同步", .dark),
+            ("week-medium-multi-day", tasks + [weekOnly, spanning], "", .light)
+        ]
+        for (name, items, message, colorScheme) in variants {
+            let widget = WidgetCalendarView(date: today.date(in: .current), tasks: items, mode: .week,
+                                            family: .systemMedium, message: message, complete: { _ in })
+                .environment(\.colorScheme, colorScheme)
+            let natural = widget.frame(width: 344).fixedSize(horizontal: false, vertical: true)
+            let image = try XCTUnwrap(ImageRenderer(content: natural).nsImage)
+            XCTAssertGreaterThan(image.size.height, 0, name)
+            XCTAssertLessThanOrEqual(image.size.height, 164, name)
+
+            let card = widget.frame(width: 344, height: 164)
+                .background(AppStyle.surface(colorScheme), in: RoundedRectangle(cornerRadius: 20))
+            let renderer = ImageRenderer(content: card)
+            renderer.scale = 2
+            let attachment = XCTAttachment(image: try XCTUnwrap(renderer.nsImage), quality: .original)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
     }
     #endif
 

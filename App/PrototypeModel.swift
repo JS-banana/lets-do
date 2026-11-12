@@ -152,14 +152,14 @@ final class PrototypeModel: ObservableObject {
                     session = try await StoreSession.forMainApp(blockedSession: blockedSession, cloudSyncEnabled: cloudSyncEnabled)
                 }
                 status = session.cloudEnabled ? "已本机保存；iCloud 由系统异步交换"
-                    : StoreSession.supportsCloudSync ? (cloudSyncEnabled ? "请在系统设置中登录 iCloud；当前使用本机收集箱" : "本机收集箱 · iCloud 同步已关闭")
+                    : StoreSession.supportsCloudSync ? (cloudSyncEnabled ? "请在系统设置中登录 iCloud；当前使用本机任务库" : "本机任务库 · iCloud 同步已关闭")
                     : StoreSession.isDesktopLocalBuild ? "桌面本机任务 · 未接入 iCloud" : "独立本地测试库 · 未接入 iCloud"
             } catch {
                 if StoreSession.isDesktopLocalBuild { throw error }
                 session = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "local-inbox",
                                        accountHash: nil, cloudEnabled: false, ready: false)
                 cloudAccountIssue = error.localizedDescription
-                status = "iCloud 身份待确认 · 使用独立本地收集箱"
+                status = "iCloud 身份待确认 · 使用独立本机任务库"
             }
             guard !restartRequested else { return }
             let directory = try session.directory()
