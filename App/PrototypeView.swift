@@ -176,7 +176,8 @@ struct PrototypeView: View {
         }
         .onChange(of: calendarDay) { _, day in
             #if os(macOS)
-            if destination == .calendar && !hasCaptureDraft {
+            // A calendar cell can change the day and open capture with its own schedule.
+            if destination == .calendar && !captureInThisWindow && !hasCaptureDraft {
                 captureSession.begin(schedule: contextCaptureSchedule)
             }
             #else
