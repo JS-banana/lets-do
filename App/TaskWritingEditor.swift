@@ -31,18 +31,23 @@ struct TaskWritingEditor: View {
     private let autofocus: Bool
     private let editable: Bool
     private let minimumHeight: CGFloat
+    private let placeholder: String?
     @StateObject private var controller = TaskWritingEditorController()
 
-    init(content: Binding<TaskWriting>, autofocus: Bool = false, editable: Bool = true, minimumHeight: CGFloat = 260) {
+    init(content: Binding<TaskWriting>, autofocus: Bool = false, editable: Bool = true, minimumHeight: CGFloat = 260,
+         placeholder: String? = nil) {
         _content = content
         self.autofocus = autofocus
         self.editable = editable
         self.minimumHeight = minimumHeight
+        self.placeholder = placeholder
     }
 
     static func finishEditing() {
         #if os(macOS)
-        NSApp.keyWindow?.makeFirstResponder(nil)
+        if let window = NSApp.keyWindow, window.firstResponder is NSTextView {
+            window.makeFirstResponder(nil)
+        }
         #else
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         #endif
@@ -56,6 +61,15 @@ struct TaskWritingEditor: View {
                     .frame(minHeight: minimumHeight)
                     .accessibilityIdentifier("taskWritingEditor")
                     .accessibilityLabel("任务编辑器；第一段为标题，换行后为正文")
+                if editable && !content.hasText, let placeholder {
+                    Text(placeholder)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                        .padding(.leading, 2)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
             .frame(minHeight: minimumHeight)
         }

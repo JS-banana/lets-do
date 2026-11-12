@@ -4,9 +4,13 @@ struct WeekView: View {
     @ObservedObject var model: PrototypeModel
     @Binding var selectedDay: Day
     let create: (Day) -> Void
-    var createWeek: ((Day) -> Void)? = nil
+    #if os(iOS)
+    let createWeek: (Day) -> Void
+    #endif
     let inspectDay: (Day) -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hoveredDay: Day?
     @State private var dropDay: Day?
     @State private var draggingTaskID: UUID?
     @State private var taskBoardViewportFrame: CGRect = .zero
@@ -64,7 +68,7 @@ struct WeekView: View {
                 HStack {
                     Text("本周待安排").font(.headline)
                     Spacer()
-                    Button("加入本周", systemImage: "plus") { createWeek?(week[0]) }
+                    Button("加入本周", systemImage: "plus") { createWeek(week[0]) }
                 }
                 ForEach(pending) { phoneRow($0) }
             }.padding()
@@ -74,10 +78,11 @@ struct WeekView: View {
     private func phoneRow(_ task: TaskSnapshot) -> some View {
         TaskAgendaRow(task: task, complete: { model.toggleCompletion(task) }, open: { model.selection = task.id })
     }
-    #endif
+    #else
 
     private var taskBoard: some View {
         let weekDays = days
+        let today = Day(date: .now, timeZone: .current)
         let spanning = model.active.filter {
             guard let range = $0.schedule.dayRange(in: .current),
                   let nextDay = range.lowerBound.addingIfPossible(days: 1) else { return false }
@@ -88,27 +93,10 @@ struct WeekView: View {
         }, timeZone: .current, visibleLaneCount: max(1, spanning.count))
         let segments = layout.segments.filter { $0.weekStart == weekDays[0] }
         let spanHeight = CGFloat((segments.map(\.lane).max() ?? -1) + 1) * 26
-        let pending = model.active.filter { !$0.isCompleted && $0.schedule == .week(start: weekDays[0]) }
-        return VStack(spacing: 14) {
-            HStack {
-                CalendarDateButton(
-                    day: Binding(get: { selectedDay }, set: { selectDay($0) }),
-                    title: "\(AppStyle.dayLabel(weekDays[0])) – \(AppStyle.dayLabel(weekDays.last!))"
-                )
-                    .accessibilityIdentifier("calendarWeek")
-                Spacer()
-                Button { create(selectedDay) } label: { Image(systemName: "plus").frame(width: 32, height: 32) }
-                    .accessibilityLabel("在所选日期添加任务")
-                Divider().frame(height: 18).padding(.horizontal, 4)
-                Button { if let day = selectedDay.addingIfPossible(days: -7) { selectedDay = day } } label: { Image(systemName: "chevron.left").frame(width: 32, height: 32) }
-                    .accessibilityLabel("上一周").accessibilityIdentifier("previousWeek")
-                Button { selectDay(Day(date: Date(), timeZone: .current)) } label: { Text("今天").frame(width: 44, height: 32) }.accessibilityIdentifier("todayWeek")
-                Button { if let day = selectedDay.addingIfPossible(days: 7) { selectedDay = day } } label: { Image(systemName: "chevron.right").frame(width: 32, height: 32) }
-                    .accessibilityLabel("下一周").accessibilityIdentifier("nextWeek")
-            }.buttonStyle(.borderless).padding(.horizontal, 16)
+        return VStack(spacing: 0) {
             GeometryReader { geometry in
-                let column = max(140, geometry.size.width / 7)
-                ScrollView([.horizontal, .vertical]) {
+                let column = max(108, geometry.size.width / 7)
+                WorkspaceScrollView([.horizontal, .vertical]) {
                     VStack(spacing: 0) {
                         HStack(spacing: 0) {
                             ForEach(Array(weekDays.enumerated()), id: \.element) { index, day in
@@ -117,80 +105,75 @@ struct WeekView: View {
                                         Text("周" + ["一", "二", "三", "四", "五", "六", "日"][index]).font(.caption).foregroundStyle(.secondary)
                                         Text(String(Int(day.rawValue.suffix(2))!)).font(.title2.weight(.medium))
                                             .frame(width: 34, height: 34)
-                                            .foregroundStyle(day == Day(date: Date(), timeZone: .current) ? Color.white : .primary)
+                                            .foregroundStyle(day == today ? Color.white : .primary)
                                             .background {
-                                                if day == Day(date: Date(), timeZone: .current) { Circle().fill(AppStyle.accent) }
+                                                if day == today { Circle().fill(AppStyle.accent) }
                                                 else if day == selectedDay { Circle().stroke(AppStyle.accent.opacity(0.5), lineWidth: 1) }
                                             }
-                                    }.frame(width: column, height: 80)
-                                        .background(AppStyle.surface(colorScheme))
-                                        .overlay(alignment: .trailing) { Rectangle().fill(Color.secondary.opacity(0.22)).frame(width: 1) }
-                                }.buttonStyle(.plain).accessibilityLabel(AppStyle.dayLabel(day))
+                                    }.frame(width: column, height: 68)
+                                        .background(dayFill(day))
+                                        .overlay(alignment: .trailing) { Rectangle().fill(Color.secondary.opacity(0.18)).frame(width: 1) }
+                                }.buttonStyle(.plain).accessibilityLabel(AppStyle.dayLabel(day) + (day == today ? "，今天" : ""))
+                                    .onHover { updateHover(for: day, inside: $0) }
+                                    .accessibilityHint("查看当天任务")
+                                    .accessibilityAddTraits(day == selectedDay ? .isSelected : [])
                                     .accessibilityIdentifier("week-day-\(day.rawValue)")
-                            }
-                        }
-                        ZStack(alignment: .topLeading) {
-                            HStack(spacing: 0) {
-                                ForEach(weekDays) { day in
-                                    Button { selectedDay = day; create(day) } label: {
-                                        Rectangle().fill(AppStyle.surface(colorScheme))
-                                            .frame(width: column, height: spanHeight)
-                                            .overlay(alignment: .trailing) { Rectangle().fill(Color.secondary.opacity(0.22)).frame(width: 1) }
-                                    }.buttonStyle(.plain).accessibilityLabel("在\(AppStyle.dayLabel(day))添加任务")
-                                }
-                            }
-                            ForEach(segments) { segment in
-                                if let task = spanning.first(where: { $0.id == segment.taskID }) {
-                                    Button { model.selection = task.id } label: {
-                                        HStack(spacing: 4) {
-                                            if segment.continuesBefore {
-                                                Image(systemName: "chevron.left").accessibilityHidden(true)
-                                            }
-                                            Text(task.title).lineLimit(1).strikethrough(task.isCompleted)
-                                            Spacer(minLength: 0)
-                                            if segment.continuesAfter {
-                                                Image(systemName: "chevron.right").accessibilityHidden(true)
-                                            }
-                                        }
-                                        .font(.system(size: 12, weight: .medium)).padding(.horizontal, 7)
-                                        .frame(width: max(1, column * CGFloat(segment.dayCount) - 6), height: 22, alignment: .leading)
-                                        .background(AppStyle.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                                    }.buttonStyle(.plain)
-                                        .accessibilityLabel("\(task.title)，跨日任务")
-                                        .accessibilityHint("打开任务详情")
-                                        .highPriorityGesture(taskDragGesture(for: task.id, weekDays: weekDays))
-                                        .opacity(draggingTaskID == task.id ? 0.5 : 1)
-                                        .offset(x: column * CGFloat(segment.startColumn) + 3, y: CGFloat(segment.lane) * 26)
-                                }
                             }
                         }
                         HStack(alignment: .top, spacing: 0) {
                             ForEach(weekDays) { day in
                                 let dayTasks = model.scheduled(on: day).filter { task in !spanning.contains(where: { $0.id == task.id }) }
-                                VStack(alignment: .leading, spacing: 9) {
+                                VStack(alignment: .leading, spacing: 8) {
                                     ForEach(dayTasks) { task in planningTask(task, weekDays: weekDays) }
-                                    Button { create(day) } label: { Label("安排任务", systemImage: "plus").font(.caption) }
-                                        .buttonStyle(.borderless).foregroundStyle(.secondary).padding(.vertical, 5)
-                                        .accessibilityLabel("在\(AppStyle.dayLabel(day))安排任务")
-                                        .accessibilityIdentifier("week-create-\(day.rawValue)")
-                                    Spacer(minLength: 30)
+                                    Spacer(minLength: 24)
                                 }
-                                .padding(.horizontal, 7).padding(.top, 10)
+                                .padding(.horizontal, 7).padding(.top, spanHeight + 8)
                                 .frame(width: column, alignment: .topLeading)
-                                .frame(minHeight: max(280, geometry.size.height - 80 - spanHeight), alignment: .top)
+                                .frame(minHeight: max(0, geometry.size.height - 68), alignment: .top)
                             }
                         }
                         .background {
                             HStack(spacing: 0) {
                                 ForEach(weekDays) { day in
-                                    Button { selectedDay = day; create(day) } label: {
-                                        Rectangle().fill(dropDay == day ? AppStyle.accent.opacity(0.08) : AppStyle.surface(colorScheme))
-                                            .frame(width: column)
-                                            .overlay(alignment: .trailing) { Rectangle().fill(Color.secondary.opacity(0.22)).frame(width: 1).allowsHitTesting(false) }
-                                            .contentShape(Rectangle())
-                                    }.buttonStyle(.plain)
-                                        .accessibilityLabel("在\(AppStyle.dayLabel(day))添加任务")
-                                        .accessibilityIdentifier("week-blank-\(day.rawValue)")
+                                    MacCalendarDayBackground(day: day,
+                                        fill: dayFill(day),
+                                        identifier: "week-blank-\(day.rawValue)",
+                                        hover: { updateHover(for: day, inside: $0) }) {
+                                        selectedDay = day
+                                        create(day)
+                                    }.frame(width: column)
+                                        .overlay(alignment: .trailing) {
+                                            Rectangle().fill(Color.secondary.opacity(0.18)).frame(width: 1)
+                                                .allowsHitTesting(false).accessibilityHidden(true)
+                                        }
+                                }
+                            }
+                        }
+                        .overlay(alignment: .topLeading) {
+                            ZStack(alignment: .topLeading) {
+                                ForEach(segments) { segment in
+                                    if let task = spanning.first(where: { $0.id == segment.taskID }) {
+                                        Button { model.selection = task.id } label: {
+                                            HStack(spacing: 4) {
+                                                if segment.continuesBefore {
+                                                    Image(systemName: "chevron.left").accessibilityHidden(true)
+                                                }
+                                                Text(task.title).lineLimit(1).strikethrough(task.isCompleted)
+                                                Spacer(minLength: 0)
+                                                if segment.continuesAfter {
+                                                    Image(systemName: "chevron.right").accessibilityHidden(true)
+                                                }
+                                            }
+                                            .font(.system(size: 12, weight: .medium)).padding(.horizontal, 7)
+                                            .frame(width: max(1, column * CGFloat(segment.dayCount) - 6), height: 22, alignment: .leading)
+                                            .background(AppStyle.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                                        }.buttonStyle(.plain)
+                                            .accessibilityLabel("\(task.title)，跨日任务")
+                                            .accessibilityHint("打开任务详情")
+                                            .highPriorityGesture(taskDragGesture(for: task.id, weekDays: weekDays))
+                                            .opacity(draggingTaskID == task.id ? 0.5 : 1)
+                                            .offset(x: column * CGFloat(segment.startColumn) + 3, y: CGFloat(segment.lane) * 26 + 2)
+                                    }
                                 }
                             }
                         }
@@ -200,6 +183,7 @@ struct WeekView: View {
                         taskBoardContentFrame = $0
                     }
                     .contentShape(Rectangle())
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hoveredDay)
                     .dropDestination(for: String.self) { values, point in
                         guard let value = values.first,
                               let id = UUID(uuidString: value),
@@ -220,28 +204,21 @@ struct WeekView: View {
             }
             .background(AppStyle.surface(colorScheme))
             .overlay(alignment: .top) { Divider() }
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("本周待安排").font(.headline)
-                    if !pending.isEmpty {
-                        Text("\(pending.count)").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("加入本周", systemImage: "plus") { createWeek?(weekDays[0]) }
-                        .buttonStyle(.borderless).accessibilityIdentifier("addToWeek")
-                }
-                if !pending.isEmpty {
-                    ScrollView(.horizontal) {
-                        HStack(alignment: .top, spacing: 10) {
-                            ForEach(pending) { task in planningTask(task, weekDays: weekDays).frame(width: 220) }
-                        }
-                    }
-                }
-            }.padding(16)
         }
         .background(AppStyle.canvas(colorScheme))
         .coordinateSpace(.named("weekTaskBoard"))
         .accessibilityIdentifier("weekPlanner")
+    }
+
+    private func dayFill(_ day: Day) -> Color {
+        if dropDay == day { return AppStyle.accent.opacity(colorScheme == .dark ? 0.26 : 0.16) }
+        if hoveredDay == day { return MacCalendarDayBackground.highlight(in: colorScheme) }
+        return AppStyle.surface(colorScheme)
+    }
+
+    private func updateHover(for day: Day, inside: Bool) {
+        if inside { hoveredDay = day }
+        else if hoveredDay == day { hoveredDay = nil }
     }
 
     private func selectDay(_ day: Day) {
@@ -312,4 +289,5 @@ struct WeekView: View {
         guard weekDays.indices.contains(index) else { return nil }
         return weekDays[index]
     }
+    #endif
 }
