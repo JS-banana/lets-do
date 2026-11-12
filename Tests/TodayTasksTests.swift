@@ -21,7 +21,7 @@ final class TodayTasksTests: XCTestCase {
         XCTAssertTrue(TodayTasks([finished], on: monday, timeZone: .gmt).earlier.isEmpty)
     }
 
-    func testPastWeeksRangesAndInboxStayDistinct() throws {
+    func testTodayIncludesOnlyScheduledTasksAndEndedWeeks() throws {
         let monday = try Day("2026-11-09")
         let previousMonday = monday.adding(days: -7)
         let prior = task("上周", .week(start: previousMonday))
@@ -34,7 +34,6 @@ final class TodayTasksTests: XCTestCase {
         XCTAssertEqual(result.earlier.map(\.id), [prior.id])
         XCTAssertEqual(result.scheduled.map(\.id), [spansToday.id])
         XCTAssertEqual(result.finishedToday.map(\.id), [done.id])
-        XCTAssertEqual(result.inboxCount, 1)
         XCTAssertTrue(TodayTasks([prior], on: monday.adding(days: -1), timeZone: .gmt).earlier.isEmpty)
         XCTAssertEqual(TodayTasks([current], on: monday.adding(days: 7), timeZone: .gmt).earlier.map(\.id), [current.id])
     }
@@ -47,7 +46,7 @@ final class TodayTasksTests: XCTestCase {
         let prior = task("上周待安排", .week(start: monday.adding(days: -7)))
         let spanning = task("跨入下一周", .allDay(start: nextMonday.adding(days: -1), endExclusive: nextMonday.adding(days: 1)))
         let finished = task("上周已完成", prior.schedule, done: true)
-        let items = [missed, pending, prior, spanning, finished, task("收集箱", .none), pending, prior]
+        let items = [missed, pending, prior, spanning, finished, task("未安排", .none), pending, prior]
         let widget = try XCTUnwrap(WeekTaskOverview.make(today: monday.adding(days: 2), tasks: items, timeZone: .gmt))
         XCTAssertTrue(widget.rows.contains { $0.id == missed.id && $0.day == monday })
         let pendingList = WeekTaskList.pending.tasks(from: items, weekStart: monday, timeZone: .gmt)

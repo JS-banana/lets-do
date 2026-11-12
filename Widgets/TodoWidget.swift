@@ -65,7 +65,7 @@ struct TodayTasksWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "TodoM0Tasks", provider: TaskProvider()) { TaskWidgetView(entry: $0) }
             .configurationDisplayName("今天的任务")
-            .description("查看今天和此前未完成的任务，直接勾选完成，或快速记到收集箱。")
+            .description("查看今天和此前未完成的任务，直接勾选完成，或快速记下新的待办。")
             .contentMarginsDisabled()
             .supportedFamilies([.systemSmall, .systemMedium])
     }

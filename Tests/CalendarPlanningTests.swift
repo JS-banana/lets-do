@@ -50,12 +50,15 @@ final class CalendarPlanningTests: XCTestCase {
     func testDesktopRoutesRoundTripAndRejectMalformedInput() throws {
         let day = try Day("2026-10-31")
         let monday = try XCTUnwrap(day.weekStart)
-        let destinations: [AppDestination] = [.weekList(monday, .previousWeeks), .weekList(monday, .pending), .today, .inbox, .task(UUID()), .calendar(day, .week), .calendar(day, .month), .calendar(day, .agenda),
+        let destinations: [AppDestination] = [.weekList(monday, .previousWeeks), .weekList(monday, .pending), .today, .todo, .task(UUID()), .calendar(day, .week), .calendar(day, .month), .calendar(day, .agenda),
             .capture(.none), .capture(.week(start: try XCTUnwrap(day.weekStart))),
             .capture(.allDay(start: day, endExclusive: day.adding(days: 1)))]
         for destination in destinations { XCTAssertEqual(AppDestination(url: destination.url), destination) }
         let scheme = AppDestination.scheme
-        for text in ["https://capture", "\(scheme)://open/nope", "\(scheme)://open/today?date=bad", "\(scheme)://task/not-a-uuid", "\(scheme)://calendar/2026-02-30",
+        XCTAssertEqual(AppDestination.todo.url.path, "/todo")
+        XCTAssertEqual(AppDestination(url: try XCTUnwrap(URL(string: "\(scheme)://open/inbox"))), .todo)
+        for text in ["https://capture", "\(scheme)://open/nope", "\(scheme)://open/today?date=bad",
+                     "\(scheme)://open/todo?date=bad", "\(scheme)://open/inbox?date=bad", "\(scheme)://task/not-a-uuid", "\(scheme)://calendar/2026-02-30",
                      "\(scheme)://calendar/2026-10-31?view=unknown", "\(scheme)://calendar/2026-10-31?view",
                      "\(scheme)://calendar/2026-10-31?view=previous-weeks", "\(scheme)://calendar/2026-10-31?view=pending",
                      "\(scheme)://calendar/2026-10-26?view=pending&view=previous-weeks",

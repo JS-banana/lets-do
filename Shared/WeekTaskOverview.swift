@@ -5,6 +5,8 @@ public struct WeekTaskOverview: Sendable {
     public struct DayCount: Identifiable, Sendable {
         public let day: Day
         public let unfinishedCount: Int
+        /// Tasks covering this day whose titles are absent from the summary.
+        public let unshownCount: Int
         public var id: Day { day }
     }
 
@@ -22,7 +24,7 @@ public struct WeekTaskOverview: Sendable {
     public let pendingCount: Int
     public let completedWeekCount: Int
 
-    public static func make(today: Day, tasks: [CalendarTask], timeZone: TimeZone) -> Self? {
+    public static func make(today: Day, tasks: [CalendarTask], timeZone: TimeZone, rowLimit: Int = 3) -> Self? {
         guard let weekStart = today.weekStart,
               let weekEnd = weekStart.addingIfPossible(days: 7) else { return nil }
         let weekDays = (0..<7).map { weekStart.adding(days: $0) }
@@ -82,7 +84,7 @@ public struct WeekTaskOverview: Sendable {
         future.sort(by: rowOrder)
         pending.sort(by: rowOrder)
 
-        let limit = 3
+        let limit = max(1, rowLimit)
         func differentDaysFirst(_ rows: [Row]) -> [Row] {
             var seenDays: Set<Day?> = []
             var distinctDays: [Row] = []
@@ -102,9 +104,14 @@ public struct WeekTaskOverview: Sendable {
         let firstRows = groups.compactMap(\.first)
         let extraRows = groups.flatMap { $0.dropFirst().prefix(limit - 1) }
         let visible = (firstRows + extraRows).prefix(limit).sorted(by: rowOrder)
+        let visibleRanges = visible.compactMap { $0.task.schedule.dayRange(in: timeZone) }
         return Self(
             weekStart: weekStart,
-            days: weekDays.map { DayCount(day: $0, unfinishedCount: counts[$0, default: 0]) },
+            days: weekDays.map { day in
+                let count = counts[day, default: 0]
+                let shown = visibleRanges.filter { $0.contains(day) }.count
+                return DayCount(day: day, unfinishedCount: count, unshownCount: count - shown)
+            },
             rows: visible,
             unfinishedCount: past.count + current.count + future.count + pending.count,
             pendingCount: pending.count,
