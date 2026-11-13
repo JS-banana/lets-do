@@ -3,68 +3,49 @@
   <h1>Let’s Do</h1>
   <p>先记下来，再安排到某一天。</p>
   <p>
-    <a href="https://github.com/JS-banana/lets-do/releases">下载与发行版</a> ·
-    <a href="#使用">使用</a> ·
-    <a href="docs/DEVELOPMENT.md">从源码运行</a>
+    <a href="https://github.com/JS-banana/lets-do/releases/latest"><strong>下载 Mac 预览版</strong></a> ·
+    <a href="docs/USAGE.md">使用指南</a> ·
+    <a href="https://github.com/JS-banana/lets-do/issues">反馈问题</a>
   </p>
+  <p><sub>macOS 14 及以上 · Apple 芯片与 Intel · 免费开源</sub></p>
 </div>
 
-Let’s Do 是一款原生个人任务工具。随手记下想法，在待办里整理，再用周历和月历安排事情。
+Let’s Do 是一款原生 Mac 任务应用。用它记下临时想到的事，在周历和月历里安排时间，再从「今天」看看眼下要做什么。它也能与 Apple 自带的「提醒事项」联动，让 iPhone 成为随手记录和勾选完成的入口，无需另外注册账号。
 
-目前处于早期开发阶段，以 Mac 本机使用为主；iPhone 源码已包含，iCloud 跨设备同步仍在验证中。
+![Let’s Do 的月历，展示任务在日历中的安排](docs/images/readme/calendar.jpg)
 
-## 安装
+<p align="center"><sub>v0.3.1 界面 · 使用示例任务拍摄</sub></p>
 
-从 [GitHub Releases](https://github.com/JS-banana/lets-do/releases) 下载 Mac 预览版。
+<!-- 展示素材使用 v0.3.1 的应用源码、隔离的 Local 构建与示例任务；更新界面时一并更新截图和动图。 -->
 
-Mac 安装包面向 **macOS 14 及以上**，同时支持 Apple 芯片与 Intel：
+## 从记录到安排
 
-1. 下载发行版中的 `.dmg`，打开后把 `Let's Do.app` 拖到「Applications／应用程序」。
-2. 推出安装磁盘，从「应用程序」打开 Let’s Do；之后可搜索 `Let` 查找。
-3. 如系统提示无法验证开发者，先尝试打开一次，再前往「系统设置 → 隐私与安全性 → 仍要打开」。参见 [Apple 官方说明](https://support.apple.com/zh-cn/102445)。
+想读的书、周末要买的东西，或者刚想到的一个点子，都可以先记下来。只写一个标题也没关系，备注和日期等想清楚了再补。
 
-使用者不需要 Xcode，也不需要购买开发者会员。当前预览包未公证，数据保存在本机。
+准备开始做的时候，把它安排到某一天；还没确定哪天，就先放进这一周。周历适合看接下来几天，月历方便把时间拉远一点。计划有变，拖动任务就能改期。
 
-## 使用
+![实际操作演示：记录一件事，为它安排日期，再在日历中查看](docs/images/readme/capture-to-calendar.gif)
 
-以下操作以当前源码为准。
+每天打开「今天」，可以看到当天的安排，也能接着处理此前没做完的事。喜欢把计划放在眼前的话，还可以添加「今天的任务」「本周计划」或「月历总览」小组件，从桌面查看安排、勾选完成，或打开应用随手记一笔。
 
-- **今天**从当天安排开始，也会提醒此前没做完的事。在 Mac 底部输入标题，回车即可添加。
-- **日历**提供周历与月历。在 Mac 点击日期打开当天清单，点击日期格内的空白处可以按该日新建，拖动已有安排可以改期。只确定周次时，从周历的「待安排」进入该周清单。
-- **待办**汇总所有未完成任务。在这里新建可以先留空日期，之后从详情安排。已完成的任务另有清单，误删可从回收站恢复。搜索按标题查找任务，详情可回看正文历史。
+## 手机随手记，回到 Mac 接着安排
 
-`⌘N` 打开详细新建，`⌘↩` 提交；`⌘⇧N` 新建主窗口。
+出门时想起一件事，可以直接记进 iPhone 自带的「提醒事项」。借助 iCloud 提醒事项同步，回到 Mac 后就能在 Let’s Do 里选择导入，再慢慢安排到这一周。
 
-在「设置 → 数据与诊断」中可以导出 JSON 备份。恢复仅支持空的本地库；早期版本请保留独立备份。
+反过来也一样顺手：把 Mac 上需要带出门的某条任务发送到提醒事项，在手机上勾选完成，Mac 的 Let’s Do 读取到变化后也会把它标记为完成。这样不用再装一个手机应用，就能在两台设备之间接着处理事情。首次设置和具体同步范围见[使用指南](docs/USAGE.md#与手机上的提醒事项配合)。
 
-### Mac 预览版 v0.3.0
+## 下载与安装
 
-Mac 可以从选定的系统提醒事项清单导入待办。两端开启 iCloud 提醒事项后，可先在 iPhone 自带的提醒事项里记录，再到 Mac 选择要安排的事项。在 Mac 任务详情的「更多」中，也可以把指定任务发送到手机清单。在手机勾选后，Mac 应用会在读取到变化时完成原任务。需要 v0.3.0 或更新的 Mac 版本。[操作与验收](docs/MAC-REMINDERS.md)
+从 [GitHub Releases](https://github.com/JS-banana/lets-do/releases/latest) 下载 `.dmg`，打开后把 **Let’s Do.app** 拖进「应用程序」，再从那里启动。
 
-## 桌面小组件
+当前是早期预览版，尚未经过 Apple 公证。首次打开若提示无法验证开发者，先尝试打开一次，再到「系统设置 → 隐私与安全性」选择「仍要打开」。可参考 [Apple 的说明](https://support.apple.com/zh-cn/102445)。
 
-小组件需要 **v0.2.0 或更新版本**；v0.1.1 只包含主应用。各版本的可用下载以 [Releases](https://github.com/JS-banana/lets-do/releases) 为准。
+目前提供 Mac 下载版，任务库保存在本机，跨设备联动通过 Apple 提醒事项完成。独立的 iPhone 客户端仍在开发中。重要任务建议定期[导出备份](docs/USAGE.md#备份与恢复)。
 
-1. 安装后先打开一次 Let’s Do，完成任务库初始化。
-2. 在 Mac 桌面右键，选择「编辑小组件」，搜索 Let’s Do。
-3. 添加「今天的任务」「本周计划」或「月历总览」，选择适合桌面的尺寸。
+## 反馈与参与
 
-点击任务旁的圆圈可标记完成；点击任务标题或日期可打开应用中的对应内容。「快速记」会打开应用的记录窗口，供你输入并保存。
+用起来有不顺手的地方，或者遇到了问题，欢迎[提一个 Issue](https://github.com/JS-banana/lets-do/issues)。描述你当时想做什么、发生了什么，附上应用和系统版本就很有帮助；截图前记得遮住私人内容。
 
-当前源码中，「今天的任务」保留此前未完成的事项。点击数量回到应用的「今天」，底部「待办」打开完整待办。中号「本周计划」按日期分组，点日期组的日期或 `+N` 查看当天任务。
+如果想从源码运行或参与开发，可以从[开发说明](docs/DEVELOPMENT.md)开始。界面与交互的取舍记录在[产品设计](docs/PRODUCT-DESIGN.md)，维护者的构建与发版流程见[发布说明](docs/RELEASING.md)。
 
-## 当前范围
-
-Mac 下载版使用本机任务库，不连接 iCloud，无需注册应用账号。iPhone 与跨设备同步的源码仍在开发验证中。
-
-小组件与旧版本数据升级的实现和验收范围见 [Mac 分发说明](docs/MAC-DISTRIBUTION.md)。
-
-## 开发
-
-工程使用 SwiftUI、AppKit、Core Data、WidgetKit 与 App Intents，没有第三方包依赖。从源码运行与检查见[开发说明](docs/DEVELOPMENT.md)，任务与界面约定见[产品与界面设计](docs/PRODUCT-DESIGN.md)，CI 和维护者发版见[发布说明](docs/RELEASING.md)。
-
-遇到问题可[提交 Issue](https://github.com/JS-banana/lets-do/issues)，附上系统版本、应用版本、复现步骤；请勿上传个人任务库或签名凭据。
-
-## 许可
-
-[MIT](LICENSE) © JS-banana
+[MIT License](LICENSE) © JS-banana
