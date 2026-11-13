@@ -12,11 +12,13 @@ Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、�
 
 [Release preview](../.github/workflows/release.yml) 自动生成待验收的草稿。公开发行在验收后由维护者触发。
 
-1. 在发布 PR 中更新 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION`。版本号在 [Base.xcconfig](../Config/Base.xcconfig) 维护，自动流程识别高于现有版本标签的 `X.Y.Z` 版本。
-2. 合入 `main` 后，等待该提交的推送 CI 全部通过。`Release preview` 从通过 CI 的提交读取版本并打包，校验产物后将 `vX.Y.Z` 标签指向该提交并上传草稿。已有版本的普通提交会跳过。创建标签前会再检查 `main`，发现分支已推进时交给新提交的 CI 结果处理。
+1. 合入 `main` 后，等待该提交的推送 CI 全部通过。`Release preview` 以最高的 `vX.Y.Z` 标签为基准递增补丁版本及构建号，自动为主应用和 Widget 应用这两个值。例如 `v0.3.0`（构建 `5`）之后会生成 `v0.3.1`（构建 `6`）。
+2. 打包校验通过后，流程给通过 CI 的源码提交打标签并上传 Release 草稿。标签附注保存构建号，同一提交重跑复用已分配的版本和构建号。创建新标签前会再检查 `main`，发现分支已推进时交给新提交的 CI 结果处理，运行摘要会说明跳过原因。
 3. 在运行摘要打开草稿，记录源码提交和 manifest SHA256，下载候选开始验收。
 
-需要手动准备时，给已经通过 CI 的 `main` 提交推送版本一致的标签，或在 Actions 中从 `main` 运行 `Release preview`，填写已存在的 `tag`，保持 `publish_existing_draft=false`。打包或上传失败时可重跑失败任务，构建产物过了七天保留期则重跑整个流程。已有标签指向同一提交时可继续准备。标签在准备期间指向不同提交、已有草稿不完整或资产校验失败时，流程停止，保留现有材料供排查。
+日常 PR 无需改版本配置。需要指定更高的主版本或次版本时，在 [Base.xcconfig](../Config/Base.xcconfig) 设置 `MARKETING_VERSION`。自动流程优先使用高于现有标签的配置版本，构建号使用配置值与上个版本构建号加一中的较大值。Xcode 在打包时接收版本参数，源码提交和配置文件保留原样。
+
+需要手动准备时，在 Actions 中从 `main` 运行 `Release preview`，填写已存在的 `tag`，保持 `publish_existing_draft=false`。手动创建的历史格式标签仍按源码配置中的版本和构建号打包。打包或上传失败时可重跑失败任务。构建产物超过七天保留期，或旧任务重跑时原计划版本已被另一提交占用，则重跑整个流程。已有草稿不完整、标签与候选不一致或资产校验失败时，流程停止并保留现有材料供排查。
 
 流程核对版本、标签与 `main` 祖先关系，锁定源码提交，运行 XCTest，再构建通用安装包。打包器保留 Widget，由内到外分别签名，并严格核对主应用／Widget 的身份、版本、URL、模型与 Intent 元数据、双架构以及权限；拒绝团队证书、App Group、云权限、调试权限及调试动态库。
 
@@ -53,10 +55,11 @@ shasum -a 256 release-manifest.json
 | `tag` | 已验收候选的同一版本标签 |
 | `publish_existing_draft` | `true` |
 | `manifest_sha256` | 验收时记录的 `release-manifest.json` SHA256，64 位小写十六进制 |
+| `make_latest` | 勾选后公开为正式 Release 并设为 Latest，默认公开为预发布版 |
 
-此次运行跳过构建和候选上传。发布器下载现有草稿资产，重新核对源码、manifest、归档散列及远端资产身份，确认 manifest 散列与输入一致后，将同一个草稿公开为预览版。**不重新编译、不重新签名、不重新上传资产。** 资产或标签发生变化、草稿缺失或散列不符时停止。
+发布器下载现有候选资产，重新核对源码、版本、构建号、manifest、归档散列及远端资产身份，确认 manifest 散列与输入一致后，直接公开同一个草稿。勾选 Latest 时，运行摘要会在 GitHub 确认 Latest 后给出链接。资产或标签发生变化、候选缺失或散列不符时停止。
 
-`prepare` 与 `publish` 按标签串行写入，使用 GitHub 自带的 `GITHUB_TOKEN`。只有这两个任务获得 `contents: write`。自动创建标签后在同一轮运行上传草稿，无需 PAT、Apple 账户或签名 Secrets。
+发布流程串行运行，避免同时分配同一个版本。只有上传草稿和公开发行的任务获得 `contents: write`，使用 GitHub 自带的 `GITHUB_TOKEN`。自动创建标签后在同一轮运行上传草稿。
 
 ## 本机打包与留证
 
