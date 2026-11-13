@@ -36,14 +36,7 @@ Let’s Do 是一款原生 Mac 任务应用，用日历安排待办，也能借�
 
 [下载 Mac 预览版](https://github.com/JS-banana/lets-do/releases/latest)，打开 DMG，把 Let’s Do.app 拖进「应用程序」即可。
 
-<details>
-<summary>首次打开与数据说明</summary>
-
-当前预览版尚未经过 Apple 公证。首次打开若被系统拦截，请参阅[安装帮助](docs/USAGE.md#安装或使用遇到问题)。
-
-任务库保存在本机，重要内容建议定期[导出备份](docs/USAGE.md#备份与恢复)。
-
-</details>
+首次打开若被系统拦截，请参阅[安装帮助](docs/USAGE.md#安装或使用遇到问题)。
 
 ---
 
