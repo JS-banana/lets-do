@@ -277,6 +277,19 @@ def create_candidate_tag(repo, version, commit):
     return object_sha
 
 
+def bind_draft_tag(endpoint, draft, tag):
+    require(draft.get("draft") is True, "The release must remain a draft until runtime acceptance.")
+    if draft.get("tag_name") == tag:
+        return draft
+    require(re.fullmatch(r"untagged-[0-9a-f]+", draft.get("tag_name") or ""),
+            "The draft is associated with a different tag.")
+    bound = json.loads(run("bind-draft-tag", ["gh", "api", "--method", "PATCH", endpoint,
+        "-f", f"tag_name={tag}", "-F", "draft=true"]).stdout)
+    require(bound.get("id") == draft["id"] and bound.get("tag_name") == tag and bound.get("draft") is True,
+            "GitHub did not bind the draft to the expected tag.")
+    return bound
+
+
 def prepare(version, commit, asset_dir):
     tag = version.tag
     repo = repository()
@@ -324,11 +337,11 @@ def prepare(version, commit, asset_dir):
         created = json.loads(run("create-draft", ["gh", "api", "--method", "POST", endpoint,
                                                 "--input", str(payload)]).stdout)
         release_id = created["id"]
-        require(created.get("draft") is True, "The new release must remain a draft.")
+        draft_endpoint = f"{endpoint}/{release_id}"
+        bind_draft_tag(draft_endpoint, created, tag)
         run("upload-assets", ["gh", "release", "upload", tag, "--repo", repo] + [str(path) for path in assets])
-        uploaded = json.loads(run("uploaded-assets", ["gh", "api", f"{endpoint}/{release_id}"]).stdout)
-        require(uploaded.get("tag_name") == tag and uploaded.get("draft") is True,
-                "The release must remain a draft for the expected tag until runtime acceptance.")
+        uploaded = json.loads(run("uploaded-assets", ["gh", "api", draft_endpoint]).stdout)
+        uploaded = bind_draft_tag(draft_endpoint, uploaded, tag)
         verify_uploaded(uploaded, assets, hashes)
         require(remote_refs(ref).get(ref) == object_sha, "The remote tag is missing or moved.")
         complete = True
