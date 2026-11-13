@@ -18,13 +18,20 @@ parser = argparse.ArgumentParser(description=__doc__)
 destination = parser.add_mutually_exclusive_group()
 destination.add_argument("--output", type=Path, help="DMG path; ZIP, manifest and checksums go beside it.")
 destination.add_argument("--output-dir", type=Path, help="Release asset directory (default: an isolated .build directory).")
+parser.add_argument("--version", help="Marketing version assigned by the release workflow.")
+parser.add_argument("--build-number", help="Build number assigned by the release workflow.")
 args = parser.parse_args()
+if (args.version is None) != (args.build_number is None):
+    parser.error("--version and --build-number must be supplied together.")
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 workspace = ROOT / ".build" / "packages" / stamp
 workspace.mkdir(parents=True, exist_ok=False)
 built_app = workspace / "DerivedData" / "Build" / "Products" / "MacDistribution" / "Let's Do.app"
-version_match = re.search(r"^MARKETING_VERSION\s*=\s*(\S+)\s*$", (ROOT / "Config/Base.xcconfig").read_text(), re.MULTILINE)
-version = version_match.group(1) if version_match else "unknown"
+config = (ROOT / "Config/Base.xcconfig").read_text()
+version_match = re.search(r"^MARKETING_VERSION[ \t]*=[ \t]*(\S+)[ \t]*$", config, re.MULTILINE)
+build_match = re.search(r"^CURRENT_PROJECT_VERSION[ \t]*=[ \t]*(\S+)[ \t]*$", config, re.MULTILINE)
+version = args.version if args.version is not None else version_match.group(1) if version_match else "unknown"
+build_number = args.build_number if args.build_number is not None else build_match.group(1) if build_match else "unknown"
 asset_dir = args.output_dir.expanduser().resolve() if args.output_dir else workspace / "dist"
 output = args.output.expanduser().resolve() if args.output else asset_dir / f"lets-do-{version}-macos-universal.dmg"
 asset_dir = output.parent
@@ -124,6 +131,7 @@ exit_code = 1
 try:
     require(sys.platform == "darwin", "Mac packaging requires macOS and Xcode.")
     require(re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version), "Use a numeric semantic MARKETING_VERSION.")
+    require(re.fullmatch(r"[1-9][0-9]*", build_number), "Use a positive integer CURRENT_PROJECT_VERSION.")
     require(output.suffix.lower() == ".dmg", "--output must name a .dmg file.")
     require(not any(path.exists() or path.is_symlink() for path in (output, archive, manifest_path, sums_path)),
             "An output asset already exists; choose a new directory.")
@@ -141,6 +149,7 @@ try:
         "DEVELOPMENT_TEAM=", "CODE_SIGN_IDENTITY=-", "CODE_SIGNING_ALLOWED=NO", "CODE_SIGN_ENTITLEMENTS=",
         "CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO", "M0_APP_GROUP=", "M0_CLOUD_CONTAINER=",
         "M0_BUNDLE_PREFIX=com.panion.todo.m0", "M0_URL_SCHEME=todom0",
+        f"MARKETING_VERSION={version}", f"CURRENT_PROJECT_VERSION={build_number}",
     ])
     app = built_app
     require(app.is_dir(), "The Mac app is missing.")
@@ -154,9 +163,9 @@ try:
             "Only the Mac app must declare its Reminders usage.")
     require(info.get("CFBundleIdentifier") == "com.panion.todo.m0.mac", "Unexpected distribution app identity.")
     require(widget_info.get("CFBundleIdentifier") == info["CFBundleIdentifier"] + ".widget", "Unexpected Widget identity.")
-    require(info.get("CFBundleShortVersionString") == version, "The built version does not match MARKETING_VERSION.")
-    require(widget_info.get("CFBundleShortVersionString") == version and widget_info.get("CFBundleVersion") == info.get("CFBundleVersion"),
-            "The app and Widget versions must match.")
+    for bundle_info in (info, widget_info):
+        require(bundle_info.get("CFBundleShortVersionString") == version and bundle_info.get("CFBundleVersion") == build_number,
+                "The app and Widget must both use the expected marketing version and build number.")
     require(widget_info.get("NSExtension", {}).get("NSExtensionPointIdentifier") == "com.apple.widgetkit-extension",
             "The embedded extension is not a WidgetKit extension.")
     require(any("todom0" in item.get("CFBundleURLSchemes", []) for item in info.get("CFBundleURLTypes", [])),

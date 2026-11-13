@@ -20,6 +20,14 @@ on:
       manifest_sha256:
         description: SHA256 of the candidate manifest used for runtime acceptance (required for publication)
         type: string
+      make_latest:
+        description: Publish the accepted draft as the Latest release
+        type: boolean
+        default: false
+
+concurrency:
+  group: mac-release
+  queue: max
 
 permissions:
   contents: read
@@ -43,6 +51,8 @@ jobs:
     outputs:
       tag: ${{ steps.candidate.outputs.tag || steps.tag.outputs.tag }}
       commit: ${{ steps.candidate.outputs.commit || steps.tag.outputs.commit }}
+      build_number: ${{ steps.candidate.outputs.build_number || steps.tag.outputs.build_number }}
+      override: ${{ steps.candidate.outputs.override || steps.tag.outputs.override }}
     steps:
       - name: Check out trusted main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,7 +93,14 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
-        run: python3 scripts/release.py package --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --asset-dir dist
+          RELEASE_BUILD_NUMBER: ${{ needs.validate.outputs.build_number }}
+          RELEASE_OVERRIDE: ${{ needs.validate.outputs.override }}
+        run: |
+          if [[ "$RELEASE_OVERRIDE" == 'true' ]]; then
+            python3 scripts/release.py package --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --build-number "$RELEASE_BUILD_NUMBER" --asset-dir dist
+          else
+            python3 scripts/release.py package --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --asset-dir dist
+          fi
       - name: Retain only verified release assets
         id: assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -103,9 +120,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
-    concurrency:
-      group: release-assets-${{ needs.validate.outputs.tag }}
-      queue: max
     steps:
       - name: Check out trusted main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -122,9 +136,10 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+          RELEASE_BUILD_NUMBER: ${{ needs.validate.outputs.build_number }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: python3 scripts/release.py prepare --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --asset-dir dist
+        run: python3 scripts/release.py prepare --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --build-number "$RELEASE_BUILD_NUMBER" --asset-dir dist
 
   publish:
     needs: validate
@@ -133,9 +148,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
-    concurrency:
-      group: release-assets-${{ needs.validate.outputs.tag }}
-      queue: max
     steps:
       - name: Check out trusted main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -148,6 +160,12 @@ jobs:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
           CANDIDATE_MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+          MAKE_LATEST: ${{ inputs.make_latest }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: python3 scripts/release.py publish --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --manifest-sha256 "$CANDIDATE_MANIFEST_SHA256"
+        run: |
+          args=(--tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --manifest-sha256 "$CANDIDATE_MANIFEST_SHA256")
+          if [[ "$MAKE_LATEST" == 'true' ]]; then
+            args+=(--make-latest)
+          fi
+          python3 scripts/release.py publish "${args[@]}"
