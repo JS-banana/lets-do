@@ -44,6 +44,8 @@ struct LocalDraft: Codable, Equatable, Identifiable, Sendable {
     var captureSchedule: TaskSchedule? = nil
     var formatting: NoteFormatting? = nil
     var originalTitle: String? = nil
+    /// The capture plan came from a date in the title, so removing that phrase may still change it.
+    var captureScheduleFromTitle: Bool? = nil
 
     /// Residue of a save whose draft cleanup failed: this exact text and title are already committed.
     func isCommitted(in task: TaskSnapshot) -> Bool {

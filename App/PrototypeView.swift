@@ -18,7 +18,9 @@ struct PrototypeView: View {
     @Environment(\.colorScheme) private var colorScheme
     #if os(macOS)
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var captureHotKey = GlobalCaptureHotKey.shared
     @FocusState private var quickEntryFocused: Bool
     @FocusState private var macSearchFocused: Bool
     @State private var macSearchExpanded = false
@@ -251,6 +253,10 @@ struct PrototypeView: View {
             .overlay(alignment: .bottom) { completionNotice.padding(16) }
         }
         .focusedSceneValue(\.newTask, newTaskAction)
+        .task {
+            guard ProcessInfo.processInfo.environment["M0_UNIT_TEST_HOST"] != "1" else { return }
+            GlobalCaptureHotKey.shared.install { [openWindow, model] in model.openQuickCapture(openWindow) }
+        }
     }
 
     private var drawerIsOpen: Bool {
@@ -586,8 +592,18 @@ struct PrototypeView: View {
             .background(AppStyle.accent.opacity(colorScheme == .dark ? 0.14 : 0.06), in: RoundedRectangle(cornerRadius: 6))
             .overlay { RoundedRectangle(cornerRadius: 6).stroke(quickEntryFocused ? AppStyle.accentText(colorScheme).opacity(0.55) : Color.clear, lineWidth: 1) }
             if hasCaptureDraft && captureSession.plan.schedule != contextCaptureSchedule {
-                Text(captureSession.plan.schedule == .none ? "添加为未安排" : "添加到" + AppStyle.scheduleLabel(captureSession.plan.schedule))
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text(captureSession.plan.schedule == .none ? "添加为未安排" : "添加到" + AppStyle.scheduleLabel(captureSession.plan.schedule))
+                        .foregroundStyle(.secondary)
+                    if captureSession.dateFromTitle {
+                        Button("不按标题安排") { captureSession.ignoreTitleDate() }
+                            .buttonStyle(.borderless)
+                            .help("标题保持原样，按当前页面的默认安排添加")
+                            .accessibilityIdentifier("ignoreTitleDate")
+                    }
+                }
+                .font(.caption).padding(.leading, 16)
+                .accessibilityIdentifier("quickEntryPlan")
             }
             if let error = captureSession.plan.error {
                 Text(error).font(.caption).foregroundStyle(.red).padding(.leading, 16)
@@ -633,8 +649,7 @@ struct PrototypeView: View {
                         Text(query.isEmpty ? destination.rawValue : "搜索结果").font(.system(size: 26, weight: .semibold))
                         Spacer()
                         if query.isEmpty && destination == .todo {
-                            Button("从提醒事项导入", systemImage: "tray.and.arrow.down") { showingReminderImport = true }
-                                .buttonStyle(.borderless)
+                            MacReminderImportEntry(reminders: model.reminders) { showingReminderImport = true }
                         }
                     }
                     if destination == .today && query.isEmpty {
@@ -1047,6 +1062,18 @@ struct PrototypeView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         if StoreSession.supportsCloudSync { cloudSettings } else { localStorageSettings }
                     }
+                    #if os(macOS)
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("快速记录").font(.headline)
+                        Toggle("在任何应用中按 \(GlobalCaptureHotKey.shortcut) 记下一件事", isOn: Binding(get: { captureHotKey.enabled }, set: { captureHotKey.setEnabled($0) }))
+                            .toggleStyle(.switch)
+                            .accessibilityIdentifier("globalCaptureToggle")
+                        Text(captureHotKey.failure ?? "Let’s Do 运行时可用；关闭窗口后应用仍在运行即可。")
+                            .font(.caption).foregroundStyle(captureHotKey.failure == nil ? Color.secondary : Color.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    #endif
                     Divider()
                     VStack(alignment: .leading, spacing: 10) {
                         Text("数据").font(.headline)
