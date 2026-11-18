@@ -953,12 +953,12 @@ final class TaskStore {
     }
 
     func restoreIntoEmptyLocalStore(_ archive: TaskArchive) throws {
-        guard !mirrored, !isExtension else { throw PrototypeError.invalid("M0 只允许恢复到空的隔离本地库。") }
+        guard !mirrored, !isExtension else { throw PrototypeError.invalid("备份只能恢复到空的本机任务库；原有任务未改动。") }
         let verified = try TaskArchive.decode(archive.encoded())
         try write("archive.restore", id: UUID()) { context in
             let request = NSFetchRequest<NSManagedObject>(entityName: "TaskItem")
             guard try context.count(for: request) == 0 else {
-                throw PrototypeError.invalid("目标库非空；未覆盖。请选择新的 M0 测试命名空间。")
+                throw PrototypeError.invalid("当前任务库已有任务，备份没有导入。恢复只支持空的本机任务库，原有任务未改动。")
             }
             for task in verified.tasks {
                 let item = NSEntityDescription.insertNewObject(forEntityName: "TaskItem", into: context)

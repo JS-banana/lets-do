@@ -94,4 +94,44 @@ final class TodayTasksTests: XCTestCase {
         XCTAssertEqual(TodayTasks([oldest, recent], on: day, timeZone: .gmt).visibleRows(limit: 2).earlier.map(\.id), [recent.id, oldest.id])
         XCTAssertEqual(TodayTasks(todayTasks, on: day, timeZone: .gmt).visibleRows(limit: 2).scheduled.count, 2)
     }
+
+    func testTodoSectionsGroupOpenTasksByPlanInDisplayOrder() throws {
+        let wednesday = try Day("2026-11-11")
+        let monday = wednesday.adding(days: -2)
+        let nextMonday = monday.adding(days: 7)
+        func day(_ start: Day, days: Int = 1) -> TaskSchedule { .allDay(start: start, endExclusive: start.adding(days: days)) }
+        let missed = task("周一没做", day(monday))
+        let lastWeek = task("上周待安排", .week(start: monday.adding(days: -7)))
+        let spansToday = task("跨到今天", day(monday, days: 3))
+        let friday = task("周五", day(wednesday.adding(days: 2)))
+        let thursday = task("周四", day(wednesday.adding(days: 1)))
+        let thisWeek = task("本周待安排", .week(start: monday))
+        let nextWeek = task("下周待安排", .week(start: nextMonday))
+        let nextMondayTask = task("下周一", day(nextMonday))
+        let inbox = task("未安排", .none)
+        let done = task("已完成", day(wednesday.adding(days: 1)), done: true)
+        let items = [inbox, nextWeek, thisWeek, friday, missed, spansToday, thursday, nextMondayTask, lastWeek, done, friday]
+
+        let sections = TodoSections(items, on: wednesday, timeZone: .gmt)
+        XCTAssertEqual(sections.groups.map { $0.group }, [.earlier, .today, .thisWeek, .later, .unscheduled])
+        let ids = sections.groups.map { $0.items.map(\.id) }
+        XCTAssertEqual(ids[0], TodayTasks(items, on: wednesday, timeZone: .gmt).earlier.map(\.id))
+        XCTAssertEqual(Set(ids[0]), [missed.id, lastWeek.id])
+        XCTAssertEqual(ids[1], [spansToday.id])
+        XCTAssertEqual(ids[2], [thursday.id, friday.id, thisWeek.id])
+        XCTAssertEqual(ids[3], [nextMondayTask.id, nextWeek.id])
+        XCTAssertEqual(ids[4], [inbox.id])
+        XCTAssertFalse(ids.joined().contains(done.id))
+        XCTAssertEqual(ids.joined().count, Set(ids.joined()).count)
+    }
+
+    func testTodoSectionsOmitEmptyGroupsAndKeepSundayWeekPlansThisWeek() throws {
+        let sunday = try Day("2026-11-15")
+        let monday = try Day("2026-11-09")
+        let pending = task("本周待安排", .week(start: monday))
+        let tomorrow = task("明天", .allDay(start: sunday.adding(days: 1), endExclusive: sunday.adding(days: 2)))
+        let sections = TodoSections([pending, tomorrow], on: sunday, timeZone: .gmt)
+        XCTAssertEqual(sections.groups.map { $0.group }, [.thisWeek, .later])
+        XCTAssertTrue(TodoSections([task("已完成", .none, done: true)], on: sunday, timeZone: .gmt).groups.isEmpty)
+    }
 }
