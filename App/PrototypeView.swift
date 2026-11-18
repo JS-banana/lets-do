@@ -819,6 +819,7 @@ struct PrototypeView: View {
     private func phoneArchivePage(_ page: Destination) -> some View {
         let query = archiveSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return phoneTaskCollection(in: page, matching: query)
+            .safeAreaInset(edge: .top, spacing: 0) { unreadableNotice }
             .navigationTitle(query.isEmpty ? page.rawValue : "搜索结果")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $archiveSearch, placement: .navigationBarDrawer(displayMode: .always),

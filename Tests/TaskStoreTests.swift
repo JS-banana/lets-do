@@ -1103,38 +1103,97 @@ final class TaskStoreTests: XCTestCase {
         }
     }
 
+    /// Every attribute of every record, read through a separate context.
     @MainActor
-    func testReadableSnapshotsSkipUnreadableTasksWithoutTouchingRecords() throws {
-        try withStore { store in
-            let good = UUID(), conflicted = UUID(), badPlan = UUID(), revision = UUID()
-            try store.createTask(id: good, title: "仍可读取", body: "正文")
-            try store.createTask(id: conflicted, title: "正文冲突")
-            try store.saveNoteRevision(taskID: conflicted, id: revision, body: "same", parentIDs: [])
-            try store.createTask(id: badPlan, title: "计划损坏")
-            let context = try XCTUnwrap(store.container).viewContext
-            let duplicate = NSEntityDescription.insertNewObject(forEntityName: "TaskNoteRevision", into: context)
-            duplicate.setValue(revision, forKey: "id"); duplicate.setValue(conflicted, forKey: "taskID")
-            duplicate.setValue("different", forKey: "body"); duplicate.setValue(Date(), forKey: "createdAt")
-            duplicate.setValue("[]", forKey: "parentIDsJSON")
-            let request = NSFetchRequest<NSManagedObject>(entityName: "TaskItem")
-            request.predicate = NSPredicate(format: "id == %@", badPlan as NSUUID)
-            try XCTUnwrap(context.fetch(request).first).setValue("{\"unknown\":{}}", forKey: "scheduleJSON")
-            let anonymous = NSEntityDescription.insertNewObject(forEntityName: "TaskItem", into: context)
-            anonymous.setValue("身份未到达", forKey: "title")
-            try context.save()
-            let counts = try ["TaskItem", "TaskNoteRevision"].map {
-                try context.count(for: NSFetchRequest<NSFetchRequestResult>(entityName: $0))
+    private func rawRecords(_ store: TaskStore) throws -> [String] {
+        let container = try XCTUnwrap(store.container)
+        let context = container.newBackgroundContext()
+        return try context.performAndWait {
+            var lines: [String] = []
+            for entity in ["TaskItem", "TaskNoteRevision"] {
+                for object in try context.fetch(NSFetchRequest<NSManagedObject>(entityName: entity)) {
+                    let keys = object.entity.attributesByName.keys.sorted()
+                    lines.append(entity + ":" + keys.map { key in
+                        let value = object.value(forKey: key)
+                        return "\(key)=\((value as? UUID)?.uuidString ?? String(describing: value))"
+                    }.joined(separator: ","))
+                }
             }
+            return lines.sorted()
+        }
+    }
 
-            XCTAssertThrowsError(try store.snapshots())
-            XCTAssertThrowsError(try store.archive())
-            let read = try store.readableSnapshots()
-            XCTAssertEqual(read.tasks.map(\.id), [good])
-            XCTAssertEqual(read.tasks.first?.currentNote?.body, "正文")
-            XCTAssertEqual(read.unreadable, 3)
-            XCTAssertEqual(try ["TaskItem", "TaskNoteRevision"].map {
-                try context.count(for: NSFetchRequest<NSFetchRequestResult>(entityName: $0))
-            }, counts)
+    @MainActor
+    func testReadableSnapshotsSkipEachKindOfUnreadableTaskWithoutTouchingRecords() throws {
+        typealias Damage = (TaskStore, NSManagedObjectContext) throws -> Set<UUID>
+        func insertNote(_ context: NSManagedObjectContext, id: UUID, task: UUID?, body: String) {
+            let note = NSEntityDescription.insertNewObject(forEntityName: "TaskNoteRevision", into: context)
+            note.setValue(id, forKey: "id"); note.setValue(task, forKey: "taskID")
+            note.setValue(body, forKey: "body"); note.setValue(Date(), forKey: "createdAt")
+            note.setValue("[]", forKey: "parentIDsJSON")
+        }
+        func task(_ context: NSManagedObjectContext, _ id: UUID) throws -> NSManagedObject {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "TaskItem")
+            request.predicate = NSPredicate(format: "id == %@", id as NSUUID)
+            return try XCTUnwrap(context.fetch(request).first)
+        }
+        let cases: [(String, anonymous: Int, Damage)] = [
+            ("正文同版本冲突", 0, { store, context in
+                let id = UUID(), revision = UUID()
+                try store.createTask(id: id, title: "冲突")
+                try store.saveNoteRevision(taskID: id, id: revision, body: "same", parentIDs: [])
+                insertNote(context, id: revision, task: id, body: "different")
+                return [id]
+            }),
+            ("计划无法解码", 0, { store, context in
+                let id = UUID()
+                try store.createTask(id: id, title: "计划损坏")
+                try task(context, id).setValue("{\"unknown\":{}}", forKey: "scheduleJSON")
+                return [id]
+            }),
+            ("任务缺身份", 1, { _, context in
+                NSEntityDescription.insertNewObject(forEntityName: "TaskItem", into: context).setValue("身份未到达", forKey: "title")
+                return []
+            }),
+            ("正文缺 taskID，只剩关系", 0, { store, context in
+                let id = UUID()
+                try store.createTask(id: id, title: "正文身份缺失", body: "旧正文")
+                let request = NSFetchRequest<NSManagedObject>(entityName: "TaskNoteRevision")
+                request.predicate = NSPredicate(format: "taskID == %@", id as NSUUID)
+                try XCTUnwrap(context.fetch(request).first).setValue(nil, forKey: "taskID")
+                return [id]
+            }),
+            ("跨任务的父版本环", 0, { store, _ in
+                let first = UUID(), second = UUID(), a = UUID(), b = UUID()
+                try store.createTask(id: first, title: "环 A")
+                try store.createTask(id: second, title: "环 B")
+                try store.saveNoteRevision(taskID: first, id: a, body: "a", parentIDs: [b])
+                try store.saveNoteRevision(taskID: second, id: b, body: "b", parentIDs: [a])
+                return [first, second]
+            }),
+            ("无归属的孤儿正文", 0, { _, context in
+                insertNote(context, id: UUID(), task: nil, body: "无主")
+                return []
+            })
+        ]
+        for (name, anonymous, damage) in cases {
+            try withStore { store in
+                let good = UUID()
+                try store.createTask(id: good, title: "仍可读取", body: "正文")
+                let context = try XCTUnwrap(store.container).viewContext
+                let hidden = try damage(store, context)
+                try context.save()
+                let before = try rawRecords(store)
+
+                XCTAssertThrowsError(try store.snapshots(), name)
+                XCTAssertThrowsError(try store.archive(), name)
+                let read = try store.readableSnapshots()
+                XCTAssertEqual(read.tasks.map(\.id), [good], name)
+                XCTAssertEqual(read.tasks.first?.currentNote?.body, "正文", name)
+                XCTAssertEqual(read.unreadableIDs, hidden, name)
+                XCTAssertEqual(read.anonymousTasks, anonymous, name)
+                XCTAssertEqual(try rawRecords(store), before, "\(name)：读取不得改动任何记录")
+            }
         }
     }
 

@@ -25,7 +25,8 @@ struct TaskProvider: TimelineProvider {
                 let session = try await StoreSession.forExtension()
                 let store = try TaskStore(directory: session.directory(), isExtension: true, session: session)
                 defer { try? store.close() }
-                let tasks = try store.readableSnapshots().tasks.filter { $0.deletedAt == nil }.map {
+                let read = try store.readableSnapshots()
+                let tasks = read.tasks.filter { $0.deletedAt == nil }.map {
                     CalendarTask(id: $0.id, title: $0.title, schedule: $0.schedule, isCompleted: $0.isCompleted, preview: $0.currentNote?.body ?? "")
                 }
                 store.record("widget.timeline", outcome: "read-local")
@@ -36,8 +37,10 @@ struct TaskProvider: TimelineProvider {
                     calendar.date(byAdding: .day, value: $0, to: calendar.startOfDay(for: now))
                 }
                 let entries = dates.map {
+                    // Skipped tasks must not read as an empty day.
                     TaskEntry(date: $0, tasks: tasks, namespace: session.namespace,
-                              message: session.cloudEnabled ? "本机完成 · 打开应用后同步" : "")
+                              message: read.unreadableCount > 0 ? "\(read.unreadableCount) 条任务暂不可读 · 打开应用查看"
+                                  : session.cloudEnabled ? "本机完成 · 打开应用后同步" : "")
                 }
                 completion(Timeline(entries: entries, policy: .atEnd))
             } catch {
