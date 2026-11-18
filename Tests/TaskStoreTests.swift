@@ -1071,6 +1071,7 @@ final class TaskStoreTests: XCTestCase {
         try store.saveDraft(draft)
         try JSONEncoder().encode(second).write(to: gate, options: .atomic)
         XCTAssertThrowsError(try store.snapshots())
+        XCTAssertThrowsError(try store.readableSnapshots())
         XCTAssertThrowsError(try store.createTask(id: UUID(), title: "must not write"))
         XCTAssertThrowsError(try store.saveDraft(draft))
         XCTAssertThrowsError(try store.drafts())
@@ -1099,6 +1100,41 @@ final class TaskStoreTests: XCTestCase {
             try context.save()
             XCTAssertThrowsError(try store.snapshots())
             XCTAssertEqual(try context.count(for: NSFetchRequest<NSFetchRequestResult>(entityName: "TaskNoteRevision")), 2)
+        }
+    }
+
+    @MainActor
+    func testReadableSnapshotsSkipUnreadableTasksWithoutTouchingRecords() throws {
+        try withStore { store in
+            let good = UUID(), conflicted = UUID(), badPlan = UUID(), revision = UUID()
+            try store.createTask(id: good, title: "仍可读取", body: "正文")
+            try store.createTask(id: conflicted, title: "正文冲突")
+            try store.saveNoteRevision(taskID: conflicted, id: revision, body: "same", parentIDs: [])
+            try store.createTask(id: badPlan, title: "计划损坏")
+            let context = try XCTUnwrap(store.container).viewContext
+            let duplicate = NSEntityDescription.insertNewObject(forEntityName: "TaskNoteRevision", into: context)
+            duplicate.setValue(revision, forKey: "id"); duplicate.setValue(conflicted, forKey: "taskID")
+            duplicate.setValue("different", forKey: "body"); duplicate.setValue(Date(), forKey: "createdAt")
+            duplicate.setValue("[]", forKey: "parentIDsJSON")
+            let request = NSFetchRequest<NSManagedObject>(entityName: "TaskItem")
+            request.predicate = NSPredicate(format: "id == %@", badPlan as NSUUID)
+            try XCTUnwrap(context.fetch(request).first).setValue("{\"unknown\":{}}", forKey: "scheduleJSON")
+            let anonymous = NSEntityDescription.insertNewObject(forEntityName: "TaskItem", into: context)
+            anonymous.setValue("身份未到达", forKey: "title")
+            try context.save()
+            let counts = try ["TaskItem", "TaskNoteRevision"].map {
+                try context.count(for: NSFetchRequest<NSFetchRequestResult>(entityName: $0))
+            }
+
+            XCTAssertThrowsError(try store.snapshots())
+            XCTAssertThrowsError(try store.archive())
+            let read = try store.readableSnapshots()
+            XCTAssertEqual(read.tasks.map(\.id), [good])
+            XCTAssertEqual(read.tasks.first?.currentNote?.body, "正文")
+            XCTAssertEqual(read.unreadable, 3)
+            XCTAssertEqual(try ["TaskItem", "TaskNoteRevision"].map {
+                try context.count(for: NSFetchRequest<NSFetchRequestResult>(entityName: $0))
+            }, counts)
         }
     }
 

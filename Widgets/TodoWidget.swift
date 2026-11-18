@@ -25,7 +25,7 @@ struct TaskProvider: TimelineProvider {
                 let session = try await StoreSession.forExtension()
                 let store = try TaskStore(directory: session.directory(), isExtension: true, session: session)
                 defer { try? store.close() }
-                let tasks = try store.snapshots().filter { $0.deletedAt == nil }.map {
+                let tasks = try store.readableSnapshots().tasks.filter { $0.deletedAt == nil }.map {
                     CalendarTask(id: $0.id, title: $0.title, schedule: $0.schedule, isCompleted: $0.isCompleted, preview: $0.currentNote?.body ?? "")
                 }
                 store.record("widget.timeline", outcome: "read-local")
