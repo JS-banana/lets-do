@@ -551,6 +551,7 @@ struct PrototypeView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) { unreadableNotice }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if model.loaded && query.isEmpty && (destination == .today || destination == .todo) { quickEntry }
         }
@@ -787,6 +788,7 @@ struct PrototypeView: View {
                         .tag(item)
                 }
             }
+            .safeAreaInset(edge: .top, spacing: 0) { unreadableNotice }
             .searchable(text: $search, isPresented: $presentingSearch, placement: .navigationBarDrawer, prompt: searchPrompt)
             .navigationTitle(query.isEmpty ? destination.rawValue : "搜索结果")
             .navigationBarTitleDisplayMode(destination == .calendar ? .inline : .large)
@@ -817,6 +819,7 @@ struct PrototypeView: View {
     private func phoneArchivePage(_ page: Destination) -> some View {
         let query = archiveSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return phoneTaskCollection(in: page, matching: query)
+            .safeAreaInset(edge: .top, spacing: 0) { unreadableNotice }
             .navigationTitle(query.isEmpty ? page.rawValue : "搜索结果")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $archiveSearch, placement: .navigationBarDrawer(displayMode: .always),
@@ -932,6 +935,19 @@ struct PrototypeView: View {
                     ForEach(overview.earlier) { todayRow($0, on: today, earlier: true) }
                 }
             }.accessibilityIdentifier("earlierTasks")
+        }
+    }
+
+    @ViewBuilder
+    private var unreadableNotice: some View {
+        if model.loaded && model.unreadableTasks > 0 {
+            Label("有 \(model.unreadableTasks) 条任务暂时无法读取，已从列表中略过；原记录仍保留在任务库中。",
+                  systemImage: "exclamationmark.triangle")
+                .font(.callout).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24).padding(.vertical, 8)
+                .background(Color.orange.opacity(colorScheme == .dark ? 0.16 : 0.08))
+                .accessibilityIdentifier("unreadableTasks")
         }
     }
 
