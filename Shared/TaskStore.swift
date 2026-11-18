@@ -13,20 +13,25 @@ struct NoteRevision: Codable, Equatable, Identifiable, Sendable {
     var formatting: NoteFormatting? = nil
 
     static func validateGraph(_ revisions: [NoteRevision]) throws {
+        guard cyclic(revisions).isEmpty else { throw PrototypeError.invalid("正文父版本存在循环，未覆盖原记录。") }
+    }
+
+    /// Revisions on a parent cycle or descending from one; empty for a valid history.
+    static func cyclic(_ revisions: [NoteRevision]) -> Set<UUID> {
         let ids = Set(revisions.map(\.id))
         var dependencies = Dictionary(uniqueKeysWithValues: revisions.map { ($0.id, Set($0.parentIDs).intersection(ids)) })
         var children: [UUID: [UUID]] = [:]
         for revision in revisions { for parent in Set(revision.parentIDs).intersection(ids) { children[parent, default: []].append(revision.id) } }
         var ready = dependencies.filter { $0.value.isEmpty }.map(\.key)
-        var visited = 0
+        var visited = Set<UUID>()
         while let id = ready.popLast() {
-            visited += 1
+            visited.insert(id)
             for child in children[id, default: []] {
                 dependencies[child]?.remove(id)
                 if dependencies[child]?.isEmpty == true { ready.append(child) }
             }
         }
-        guard visited == revisions.count else { throw PrototypeError.invalid("正文父版本存在循环，未覆盖原记录。") }
+        return ids.subtracting(visited)
     }
 }
 
@@ -852,34 +857,47 @@ final class TaskStore {
                             formatting: try NoteFormatting.decode(note.value(forKey: "formattingJSON") as? String, body: body))
     }
 
+    struct ReadableTasks: Sendable {
+        let tasks: [TaskSnapshot]
+        /// Existing tasks left out because one of their records cannot be read.
+        let unreadableIDs: Set<UUID>
+        /// Task records that cannot be read and have no task UUID yet.
+        let anonymousTasks: Int
+        var unreadableCount: Int { unreadableIDs.count + anonymousTasks }
+    }
+
     /// Strict read for backups, upgrades and checks: any unreadable record fails the whole read.
     func snapshots() throws -> [TaskSnapshot] {
         try readSnapshots(strict: true).tasks
     }
 
     /// Display read for the app and widgets. A task with an unreadable record is left out
-    /// and counted, so one bad record cannot hide the rest. Nothing is modified or deleted.
-    func readableSnapshots() throws -> (tasks: [TaskSnapshot], unreadable: Int) {
+    /// and reported, so one bad record cannot hide the rest. Nothing is modified or deleted.
+    func readableSnapshots() throws -> ReadableTasks {
         try readSnapshots(strict: false)
     }
 
-    private func readSnapshots(strict: Bool) throws -> (tasks: [TaskSnapshot], unreadable: Int) {
+    private func readSnapshots(strict: Bool) throws -> ReadableTasks {
         let access = try sessionAccess()
         defer { withExtendedLifetime(access) {} }
         let context = try context
         context.refreshAllObjects()
-        var unreadable = 0      // records without a task identity
+        var anonymous = 0        // task records without a task UUID
         var broken = Set<UUID>() // tasks with at least one unreadable record
         func skip(_ error: Error, task: UUID?) throws {
             if strict { throw error }
-            if let task { broken.insert(task) } else { unreadable += 1 }
+            if let task { broken.insert(task) } else { anonymous += 1 }
         }
         let notes = try context.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskNoteRevision"))
         var revisions: [UUID: NoteRevision] = [:]
         for note in notes {
             let value: NoteRevision
             do { value = try readRevision(note) } catch {
-                try skip(error, task: note.value(forKey: "taskID") as? UUID)
+                // Attribute through the relationship when the copied task UUID is missing.
+                let owner = note.value(forKey: "taskID") as? UUID
+                    ?? (note.value(forKey: "task") as? NSManagedObject)?.value(forKey: "id") as? UUID
+                if strict { throw error }
+                if let owner { broken.insert(owner) } // an ownerless note is not a task to report
                 continue
             }
             let id = value.id
@@ -898,8 +916,9 @@ final class TaskStore {
         if strict {
             try NoteRevision.validateGraph(Array(revisions.values))
         } else {
-            for (task, values) in revisionsByTask where (try? NoteRevision.validateGraph(values)) == nil {
-                broken.insert(task)
+            // A parent cycle may span tasks; every task on or below it is unreadable.
+            for id in NoteRevision.cyclic(Array(revisions.values)) {
+                if let task = revisions[id]?.taskID { broken.insert(task) }
             }
         }
         let objects = try context.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskItem"))
@@ -933,10 +952,9 @@ final class TaskStore {
                                         schedule: schedule, currentRevisionID: object.value(forKey: "currentRevisionID") as? UUID,
                                         revisions: (revisionsByTask[id] ?? []).sorted { $0.id.uuidString < $1.id.uuidString }))
         }
-        // Count only tasks that exist; orphan notes of a task still syncing are not a task to report.
-        let skipped = unreadable + broken.intersection(groups.keys).count
+        // Report only tasks that exist; notes of a task still syncing are not a task to report.
         let tasks = results.sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
-        return (tasks, skipped)
+        return ReadableTasks(tasks: tasks, unreadableIDs: broken.intersection(groups.keys), anonymousTasks: anonymous)
     }
 
     func archive() throws -> TaskArchive {

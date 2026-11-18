@@ -11,6 +11,7 @@ final class PrototypeModel: ObservableObject {
     @Published var tasks: [TaskSnapshot] = []
     /// Tasks left out of `tasks` because a record could not be read; their records stay untouched.
     @Published private(set) var unreadableTasks = 0
+    private(set) var unreadableIDs: Set<UUID> = []
     @Published var status = "正在打开任务库…"
     @Published var error: String?
     @Published var selection: UUID?
@@ -48,6 +49,7 @@ final class PrototypeModel: ObservableObject {
     private var starting = false
     private var restartRequested = false
     private var taskToOpen: UUID?
+    private var waitingToOpenNoticeShown = false
     private var accountCheckID = UUID()
     private var startedDistributionDirectory: URL?
 
@@ -131,6 +133,7 @@ final class PrototypeModel: ObservableObject {
         loaded = false
         tasks = []
         unreadableTasks = 0
+        unreadableIDs = []
         selection = nil
         storePath = ""
         session = nil
@@ -200,14 +203,21 @@ final class PrototypeModel: ObservableObject {
             try opened.consumeHistory()
             // reload() presents read errors without throwing. Confirm the first
             // distribution read before remembering a successful startup.
-            if StoreSession.isMacDistributionBuild { _ = try opened.readableSnapshots() }
+            if StoreSession.isMacDistributionBuild {
+                // Some unreadable tasks still open the library; none readable at all suggests an
+                // incompatible or damaged library, so startup fails and extensions stay blocked.
+                let first = try opened.readableSnapshots()
+                if first.tasks.isEmpty && first.unreadableCount > 0 {
+                    throw PrototypeError.unavailable("任务库中的任务都无法读取，可能来自更新的版本或已经损坏；没有写入。")
+                }
+            }
             reload()
             if selection == nil, previousPath == storePath,
                let previousSelection, tasks.contains(where: { $0.id == previousSelection }) {
                 selection = previousSelection
             }
             loaded = true
-            capture.attach(to: opened, tasks: tasks)
+            capture.attach(to: opened, tasks: tasks, skipping: unreadableIDs)
             #if os(macOS)
             reminders.attach(opened)
             Task { await reminders.refreshIfConnected() }
@@ -218,6 +228,7 @@ final class PrototypeModel: ObservableObject {
             store = nil
             tasks = []
             unreadableTasks = 0
+            unreadableIDs = []
             selection = nil
             storePath = ""
             self.session = nil
@@ -229,6 +240,7 @@ final class PrototypeModel: ObservableObject {
 
     func openTask(id: UUID) {
         taskToOpen = id
+        waitingToOpenNoticeShown = false
         if loaded { reload() }
     }
 
@@ -237,11 +249,20 @@ final class PrototypeModel: ObservableObject {
             guard let store else { return }
             let read = try store.readableSnapshots()
             tasks = read.tasks
-            unreadableTasks = read.unreadable
+            unreadableTasks = read.unreadableCount
+            unreadableIDs = read.unreadableIDs
             if let id = taskToOpen {
-                taskToOpen = nil
-                if tasks.contains(where: { $0.id == id }) { selection = id }
-                else {
+                if tasks.contains(where: { $0.id == id }) {
+                    taskToOpen = nil
+                    selection = id
+                } else if read.unreadableIDs.contains(id) {
+                    // Keep the request; the task opens once its records can be read again.
+                    if !waitingToOpenNoticeShown {
+                        waitingToOpenNoticeShown = true
+                        error = "这条任务暂时无法读取，原记录已保留；恢复后会自动打开。"
+                    }
+                } else {
+                    taskToOpen = nil
                     selection = nil
                     error = "没有找到这条任务。它可能已被删除，或还没有同步到这台设备。"
                 }
@@ -250,6 +271,7 @@ final class PrototypeModel: ObservableObject {
         } catch {
             tasks = []
             unreadableTasks = 0
+            unreadableIDs = []
             selection = nil
             self.error = error.localizedDescription
         }
