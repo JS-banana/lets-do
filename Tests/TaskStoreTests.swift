@@ -359,6 +359,27 @@ final class TaskStoreTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testCommittedDraftResidueIsRecognisedOnlyWhenTextAndTitleMatch() throws {
+        try withStore { store in
+            let id = UUID(), revision = UUID()
+            try store.createTask(id: id, title: "甲")
+            try store.updateContent(id: id, title: "乙", revisionID: revision, body: "正文", formatting: nil, parentIDs: [])
+            var draft = LocalDraft(formatVersion: 1, id: revision, taskID: id, kind: .editor, title: "乙", body: "正文",
+                                   parentIDs: [], updatedAt: Date(), originalTitle: "甲")
+            XCTAssertTrue(draft.isCommitted(in: try XCTUnwrap(store.snapshots().first)))
+            try store.updateTitle(id: id, title: "丙")
+            // A later rename means the leftover title is no longer known to be committed.
+            XCTAssertFalse(draft.isCommitted(in: try XCTUnwrap(store.snapshots().first)))
+            draft = LocalDraft(formatVersion: 1, id: revision, taskID: id, kind: .editor, title: "丙", body: "另一个窗口的正文",
+                               parentIDs: [], updatedAt: Date())
+            XCTAssertFalse(draft.isCommitted(in: try XCTUnwrap(store.snapshots().first)))
+            draft = LocalDraft(formatVersion: 1, id: UUID(), taskID: id, kind: .editor, title: "丙", body: "正文",
+                               parentIDs: [revision], updatedAt: Date())
+            XCTAssertFalse(draft.isCommitted(in: try XCTUnwrap(store.snapshots().first)))
+        }
+    }
+
     func testRestoringRenamedAndLegacyDraftTitlesPreservesBothChoices() throws {
         var draft = LocalDraft(formatVersion: 1, id: UUID(), taskID: UUID(), kind: .editor,
                                title: "草稿标题", body: "编辑中", parentIDs: [], updatedAt: Date())
