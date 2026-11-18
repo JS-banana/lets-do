@@ -9,7 +9,7 @@ import EventKit
 @MainActor
 final class PrototypeModel: ObservableObject {
     @Published var tasks: [TaskSnapshot] = []
-    @Published var status = "正在打开隔离测试库…"
+    @Published var status = "正在打开任务库…"
     @Published var error: String?
     @Published var selection: UUID?
     @Published var storePath = ""
@@ -237,7 +237,7 @@ final class PrototypeModel: ObservableObject {
                 if tasks.contains(where: { $0.id == id }) { selection = id }
                 else {
                     selection = nil
-                    error = "此任务尚未出现在当前测试库。请确认账户，等待同步后重试。"
+                    error = "没有找到这条任务。它可能已被删除，或还没有同步到这台设备。"
                 }
             }
             WidgetCenter.shared.reloadAllTimelines()

@@ -45,6 +45,13 @@ struct LocalDraft: Codable, Equatable, Identifiable, Sendable {
     var formatting: NoteFormatting? = nil
     var originalTitle: String? = nil
 
+    /// Residue of a save whose draft cleanup failed: this exact text and title are already committed.
+    func isCommitted(in task: TaskSnapshot) -> Bool {
+        guard let revision = task.revisions.first(where: { $0.id == id }) else { return false }
+        return revision.body == body && revision.formatting == formatting
+            && TaskStore.titleChange(title, from: task.title) == nil
+    }
+
     func editorTitle(current: String) -> (text: String, baseline: String, needsChoice: Bool) {
         guard let originalTitle else {
             // A legacy draft may contain either a deliberate rename or an old copy.
@@ -953,12 +960,12 @@ final class TaskStore {
     }
 
     func restoreIntoEmptyLocalStore(_ archive: TaskArchive) throws {
-        guard !mirrored, !isExtension else { throw PrototypeError.invalid("M0 只允许恢复到空的隔离本地库。") }
+        guard !mirrored, !isExtension else { throw PrototypeError.invalid("备份只能恢复到空的本机任务库；原有任务未改动。") }
         let verified = try TaskArchive.decode(archive.encoded())
         try write("archive.restore", id: UUID()) { context in
             let request = NSFetchRequest<NSManagedObject>(entityName: "TaskItem")
             guard try context.count(for: request) == 0 else {
-                throw PrototypeError.invalid("目标库非空；未覆盖。请选择新的 M0 测试命名空间。")
+                throw PrototypeError.invalid("当前任务库已有任务，备份没有导入。恢复只支持空的本机任务库，原有任务未改动。")
             }
             for task in verified.tasks {
                 let item = NSEntityDescription.insertNewObject(forEntityName: "TaskItem", into: context)
