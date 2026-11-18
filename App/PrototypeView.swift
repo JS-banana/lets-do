@@ -21,7 +21,6 @@ struct PrototypeView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var captureHotKey = GlobalCaptureHotKey.shared
-    @State private var globalCaptureEnabled = GlobalCaptureHotKey.shared.isEnabled
     @FocusState private var quickEntryFocused: Bool
     @FocusState private var macSearchFocused: Bool
     @State private var macSearchExpanded = false
@@ -256,13 +255,7 @@ struct PrototypeView: View {
         .focusedSceneValue(\.newTask, newTaskAction)
         .task {
             guard ProcessInfo.processInfo.environment["M0_UNIT_TEST_HOST"] != "1" else { return }
-            GlobalCaptureHotKey.shared.install { [openWindow, model] in
-                // Like the widget's quick capture, a capture from another app starts unscheduled.
-                model.capture.mainWindowID = nil
-                model.capture.begin(schedule: .none)
-                openWindow(id: "capture", value: "capture")
-                NSApp.activate()
-            }
+            GlobalCaptureHotKey.shared.install { [openWindow, model] in model.openQuickCapture(openWindow) }
         }
     }
 
@@ -591,7 +584,6 @@ struct PrototypeView: View {
                     // including when the field has kept focus across midnight.
                     captureSession.begin(schedule: contextCaptureSchedule)
                     captureSession.content.title = title
-                    captureSession.recognizeDate(fallback: contextCaptureSchedule, today: Day(date: Date(), timeZone: .current))
                 }))
                     .textFieldStyle(.plain).font(.body).focused($quickEntryFocused)
                     .accessibilityIdentifier("quickTaskTitle").onSubmit(saveQuickEntry)
@@ -604,7 +596,7 @@ struct PrototypeView: View {
                     Text(captureSession.plan.schedule == .none ? "添加为未安排" : "添加到" + AppStyle.scheduleLabel(captureSession.plan.schedule))
                         .foregroundStyle(.secondary)
                     if captureSession.dateFromTitle {
-                        Button("不按标题安排") { captureSession.ignoreTitleDate(fallback: contextCaptureSchedule) }
+                        Button("不按标题安排") { captureSession.ignoreTitleDate() }
                             .buttonStyle(.borderless)
                             .help("标题保持原样，按当前页面的默认安排添加")
                             .accessibilityIdentifier("ignoreTitleDate")
@@ -1074,9 +1066,8 @@ struct PrototypeView: View {
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
                         Text("快速记录").font(.headline)
-                        Toggle("在任何应用中按 \(GlobalCaptureHotKey.shortcut) 记下一件事", isOn: $globalCaptureEnabled)
+                        Toggle("在任何应用中按 \(GlobalCaptureHotKey.shortcut) 记下一件事", isOn: Binding(get: { captureHotKey.enabled }, set: { captureHotKey.setEnabled($0) }))
                             .toggleStyle(.switch)
-                            .onChange(of: globalCaptureEnabled) { _, enabled in GlobalCaptureHotKey.shared.setEnabled(enabled) }
                             .accessibilityIdentifier("globalCaptureToggle")
                         Text(captureHotKey.failure ?? "Let’s Do 运行时可用；关闭窗口后应用仍在运行即可。")
                             .font(.caption).foregroundStyle(captureHotKey.failure == nil ? Color.secondary : Color.red)
