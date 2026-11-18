@@ -45,6 +45,13 @@ struct LocalDraft: Codable, Equatable, Identifiable, Sendable {
     var formatting: NoteFormatting? = nil
     var originalTitle: String? = nil
 
+    /// Residue of a save whose draft cleanup failed: this exact text and title are already committed.
+    func isCommitted(in task: TaskSnapshot) -> Bool {
+        guard let revision = task.revisions.first(where: { $0.id == id }) else { return false }
+        return revision.body == body && revision.formatting == formatting
+            && TaskStore.titleChange(title, from: task.title) == nil
+    }
+
     func editorTitle(current: String) -> (text: String, baseline: String, needsChoice: Bool) {
         guard let originalTitle else {
             // A legacy draft may contain either a deliberate rename or an old copy.

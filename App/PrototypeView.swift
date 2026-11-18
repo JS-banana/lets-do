@@ -849,14 +849,17 @@ struct PrototypeView: View {
                 }
                 .overlay(alignment: .bottomTrailing) { if section == .month && calendarDetailDay == nil { floatingCapture } }
             case .todo:
-                phoneTaskCollection(in: item, matching: query).overlay(alignment: .bottomTrailing) { floatingCapture }
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    phoneTaskCollection(in: item, matching: query, today: Day(date: context.date, timeZone: .current))
+                }
+                .overlay(alignment: .bottomTrailing) { floatingCapture }
             case .completed, .trash:
                 EmptyView()
             }
         }
     }
 
-    private func phoneTaskCollection(in page: Destination, matching query: String) -> some View {
+    private func phoneTaskCollection(in page: Destination, matching query: String, today: Day? = nil) -> some View {
         let tasks = collection(in: page, matching: query)
         let isTodoList = page == .todo && query.isEmpty
         return ScrollView {
@@ -867,7 +870,7 @@ struct PrototypeView: View {
                     Text(collectionEmptyTitle(in: page, matching: query))
                         .foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 48)
                 } else if isTodoList {
-                    ForEach(TodoSections(tasks, on: Day(date: Date(), timeZone: .current), timeZone: .current).groups) { section in
+                    ForEach(TodoSections(tasks, on: today ?? Day(date: Date(), timeZone: .current), timeZone: .current).groups) { section in
                         todoSectionHeader(section.group, count: section.items.count)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
                         ForEach(section.items) { task in taskRow(task) }
@@ -1014,7 +1017,7 @@ struct PrototypeView: View {
             model.perform { store in document = try ArchiveDocument(data: store.archive().encoded()); exporting = true }
         }.disabled(!model.loaded)
         Button("从 JSON 备份恢复…", systemImage: "square.and.arrow.down") { importing = true }
-            .disabled(!model.loaded)
+            .disabled(!model.loaded || model.session?.cloudEnabled == true)
         if StoreSession.isLocalBuild {
             // Development builds only; release packages never offer fixture data.
             Button("载入固定测试数据", systemImage: "testtube.2") { model.seed() }
@@ -1048,7 +1051,7 @@ struct PrototypeView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("数据").font(.headline)
                         dataActions.buttonStyle(.borderless)
-                        Text("备份包含任务和已保存的正文版本，可能有私人内容，请妥善保管。恢复只支持空的任务库，不会合并或覆盖已有任务。")
+                        Text("备份包含任务和已保存的正文版本，可能有私人内容，请妥善保管。恢复只支持空的本机任务库，不会合并或覆盖已有任务；iCloud 任务库不能恢复。")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     #if os(macOS)
@@ -1531,7 +1534,12 @@ struct TaskDetail: View {
             guard !initialized else { return }
             do {
                 let drafts = try editingStore?.drafts().filter { $0.kind == .editor && $0.taskID == task.id } ?? []
-                if let draft = drafts.first { loadDraft(draft) }
+                for draft in drafts {
+                    // A committed leftover must not replay its old title or text.
+                    if draft.isCommitted(in: task) { try? editingStore?.removeDraft(id: draft.id); continue }
+                    loadDraft(draft)
+                    break
+                }
             } catch { draftStatus = "草稿恢复失败，原文件保留：\(error.localizedDescription)" }
             initialized = true
         }
@@ -1613,19 +1621,26 @@ struct TaskDetail: View {
     /// Leaving the editor commits one revision. A restored draft whose title needs a
     /// choice, an empty title or a trashed task stays a local draft instead.
     private func commitIfChanged() {
+        // Publish text the native editor has not handed over yet (iPhone back, marked text).
+        TaskWritingEditor.finishEditing()
         guard initialized, hasCurrentStore, contentChanged, !needsDraftTitleChoice,
               !writing.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               model.tasks.first(where: { $0.id == task.id })?.deletedAt == nil else { return }
-        commitContent(title: TaskStore.titleChange(writing.title, from: baselineWriting.title))
+        // Another window may have committed or cleaned the shared draft; a failed commit
+        // writes this editor's text back so it can be recovered on the next opening.
+        if !commitContent(title: TaskStore.titleChange(writing.title, from: baselineWriting.title)) {
+            persistEditorDraft()
+        }
     }
 
-    private func commitContent(title: String?) {
-        guard hasCurrentStore else { return }
+    @discardableResult
+    private func commitContent(title: String?) -> Bool {
+        guard hasCurrentStore else { return false }
         let savedID = noteDraftID
         guard model.perform({
             try $0.updateContent(id: task.id, title: title, revisionID: savedID,
                                  body: writing.body, formatting: writing.formatting, parentIDs: parents)
-        }) else { return }
+        }) else { return false }
         if let saved = model.tasks.first(where: { $0.id == task.id }) {
             writing = TaskWriting(title: saved.title, body: saved.currentNote?.body ?? "", formatting: saved.currentNote?.formatting)
             parents = saved.currentNote.map { [$0.id] } ?? []
@@ -1637,16 +1652,22 @@ struct TaskDetail: View {
         otherDrafts.removeAll { $0.id == savedID }
         do { try editingStore?.removeDraft(id: savedID); draftStatus = "" }
         catch { draftStatus = "任务已保存；草稿清理失败，原文件保留。" }
+        return true
     }
 
     private func loadDraft(_ draft: LocalDraft) {
         guard hasCurrentStore else { return }
         TaskWritingEditor.finishEditing()
-        let title = draft.editorTitle(current: task.title)
+        let committed = task.revisions.contains { $0.id == draft.id }
+        // Once its revision is committed, the draft's original title no longer tells whether
+        // a different title is a pending rename or a stale copy; let the user choose on save.
+        let title = committed
+            ? (text: draft.title, baseline: task.title, needsChoice: TaskStore.titleChange(draft.title, from: task.title) != nil)
+            : draft.editorTitle(current: task.title)
         writing = TaskWriting(title: title.text, body: draft.body, formatting: draft.formatting)
         baselineWriting.title = title.baseline
         needsDraftTitleChoice = title.needsChoice
-        if task.revisions.contains(where: { $0.id == draft.id }) {
+        if committed {
             noteDraftID = UUID(); parents = [draft.id]
         } else { noteDraftID = draft.id; parents = draft.parentIDs }
         draftStatus = "已恢复本机草稿；远端更新不会替换正在输入的文字"
