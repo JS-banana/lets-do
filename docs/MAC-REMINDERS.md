@@ -1,6 +1,6 @@
 # Mac 与系统提醒事项
 
-在 iPhone 的「提醒事项」中记下一件事，在 Mac 的 Let’s Do 打开「待办」，点「从提醒事项导入」，再按周或日安排。公开版 v0.3.0 的同一入口在「收集箱」。两台设备登录同一 Apple 账户，并在 iCloud 设置里开启「提醒事项」。建议在 iCloud 下建一份「Let’s Do」清单，导入时核对账户名和清单名。同名本机清单只存在于该 Mac。[Apple 设置指引](https://support.apple.com/guide/icloud/mmbf52194b5a/icloud)
+在 iPhone 的「提醒事项」中记下一件事，在 Mac 的 Let’s Do 打开「待办」，点标题旁的「从提醒事项导入」图标，再按周或日安排；已选清单有可导入的事项时，图标会换成「提醒事项有 N 条新事项」。公开版 v0.3.0 的同一入口在「收集箱」。两台设备登录同一 Apple 账户，并在 iCloud 设置里开启「提醒事项」。建议在 iCloud 下建一份「Let’s Do」清单，导入时核对账户名和清单名。同名本机清单只存在于该 Mac。[Apple 设置指引](https://support.apple.com/guide/icloud/mmbf52194b5a/icloud)
 
 ## 实施顺序和数据所有权
 

@@ -222,6 +222,39 @@ final class TaskStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testQuickEntryTitleDateYieldsToExplicitChoices() throws {
+        try withStore { store in
+            let draft = CaptureDraft()
+            draft.attach(to: store, tasks: [])
+            let wednesday = try Day("2026-11-18")
+            let today = TaskSchedule.singleDay(wednesday)
+            @MainActor func type(_ title: String) {
+                draft.begin(schedule: today)
+                draft.content.title = title
+                draft.recognizeDate(fallback: today, today: wednesday)
+            }
+            type("明天买菜")
+            XCTAssertEqual(draft.plan.schedule, .singleDay(wednesday.adding(days: 1)))
+            XCTAssertTrue(draft.dateFromTitle)
+            XCTAssertEqual(try store.drafts().first?.captureSchedule, draft.plan.schedule)
+            type("买菜")
+            XCTAssertEqual(draft.plan.schedule, today)
+            XCTAssertFalse(draft.dateFromTitle)
+
+            type("周五买菜")
+            draft.ignoreTitleDate(fallback: today)
+            type("周五买菜 明天")
+            XCTAssertEqual(draft.plan.schedule, today)
+
+            draft.content = TaskWriting()
+            draft.plan = ScheduleForm(schedule: .none)
+            type("后天交报告")
+            XCTAssertEqual(draft.plan.schedule, .none, "A date picked before typing wins over the title.")
+            draft.detach()
+        }
+    }
+
+    @MainActor
     func testCaptureRefreshesImplicitDateBeforeTypingAndThenKeepsTheDraftDate() throws {
         try withStore { store in
             let draft = CaptureDraft()
