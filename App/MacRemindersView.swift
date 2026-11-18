@@ -5,9 +5,19 @@ import SwiftUI
 struct MacReminderImportEntry: View {
     @ObservedObject var reminders: MacReminders
     let open: () -> Void
+    /// The last count read without a refresh in flight; a refresh clears candidates first.
+    @State private var settled = 0
+
+    private var current: Int { reminders.selectedListID == nil ? 0 : reminders.candidates.count }
 
     var body: some View {
-        let count = reminders.selectedListID == nil ? 0 : reminders.candidates.count
+        entry(count: reminders.busy ? settled : current)
+            .onChange(of: reminders.busy, initial: true) { _, busy in if !busy { settled = current } }
+            .onChange(of: current) { _, value in if !reminders.busy { settled = value } }
+    }
+
+    @ViewBuilder
+    private func entry(count: Int) -> some View {
         if count > 0 {
             Button("提醒事项有 \(count) 条新事项", systemImage: "tray.and.arrow.down.fill", action: open)
                 .buttonStyle(.borderless)

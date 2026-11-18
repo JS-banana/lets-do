@@ -6,6 +6,7 @@ struct QuickCaptureView: View {
     @ObservedObject var model: PrototypeModel
     @ObservedObject private var draft: CaptureDraft
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
 
     init(model: PrototypeModel) {
         self.model = model
@@ -18,7 +19,11 @@ struct QuickCaptureView: View {
             if draft.save(using: model) { dismissWindow(id: "capture") }
         })
         .onAppear { draft.mainWindowID = nil }
-        .task { if !model.loaded { await model.start() } }
+        .task {
+            // A launch from the widget's quick capture opens only this window.
+            GlobalCaptureHotKey.shared.install { [openWindow, model] in model.openQuickCapture(openWindow) }
+            if !model.loaded { await model.start() }
+        }
         .onOpenURL { url in
             guard case .capture(let schedule)? = AppDestination(url: url) else { return }
             draft.mainWindowID = nil
@@ -32,6 +37,16 @@ struct QuickCaptureView: View {
     }
 }
 
+extension PrototypeModel {
+    /// The menu and the global shortcut open capture like the widget's quick capture: unscheduled.
+    func openQuickCapture(_ openWindow: OpenWindowAction) {
+        capture.mainWindowID = nil
+        capture.begin(schedule: .none)
+        openWindow(id: "capture", value: "capture")
+        NSApp.activate()
+    }
+}
+
 /// A system-wide shortcut that opens the quick capture window from any app while
 /// Let’s Do is running. Carbon hot keys need no Accessibility permission.
 @MainActor
@@ -41,11 +56,10 @@ final class GlobalCaptureHotKey: ObservableObject {
     static let shortcut = "⌃⌥N"
 
     @Published private(set) var failure: String?
+    @Published private(set) var enabled = UserDefaults.standard.object(forKey: GlobalCaptureHotKey.enabledKey) as? Bool ?? true
     private var hotKey: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private var action: (() -> Void)?
-
-    var isEnabled: Bool { UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true }
 
     func install(_ action: @escaping () -> Void) {
         self.action = action
@@ -54,11 +68,12 @@ final class GlobalCaptureHotKey: ObservableObject {
 
     func setEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
+        self.enabled = enabled
         update()
     }
 
     private func update() {
-        guard isEnabled, action != nil else {
+        guard enabled, action != nil else {
             if let hotKey { UnregisterEventHotKey(hotKey) }
             hotKey = nil
             failure = nil
@@ -67,10 +82,15 @@ final class GlobalCaptureHotKey: ObservableObject {
         guard hotKey == nil else { return }
         if handler == nil {
             var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-            InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+            let installed = InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
                 Task { @MainActor in GlobalCaptureHotKey.shared.action?() }
                 return noErr
             }, 1, &event, nil, &handler)
+            guard installed == noErr else {
+                handler = nil
+                failure = "无法启用 \(Self.shortcut)，请重新打开应用后再试。"
+                return
+            }
         }
         let id = EventHotKeyID(signature: OSType(0x4C44_4F51), id: 1) // "LDOQ"
         let status = RegisterEventHotKey(UInt32(kVK_ANSI_N), UInt32(controlKey | optionKey), id,

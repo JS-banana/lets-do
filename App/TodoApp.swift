@@ -25,7 +25,7 @@ struct TodoApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1160, height: 800)
         .handlesExternalEvents(matching: ["\(AppDestination.scheme)://task", "\(AppDestination.scheme)://calendar", "\(AppDestination.scheme)://open"])
-        .commands { TaskCommands() }
+        .commands { TaskCommands(model: model) }
         #endif
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && model.loaded {
@@ -63,6 +63,7 @@ extension FocusedValues {
 }
 
 private struct TaskCommands: Commands {
+    let model: PrototypeModel
     @FocusedValue(\.newTask) private var newTask
     @Environment(\.openWindow) private var openWindow
 
@@ -73,7 +74,7 @@ private struct TaskCommands: Commands {
                 .disabled(newTask == nil)
             Button("新建窗口") { openWindow(id: "main") }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
-            Button("快速记录") { openWindow(id: "capture", value: "capture") }
+            Button("快速记录") { model.openQuickCapture(openWindow) }
                 .keyboardShortcut("n", modifiers: [.control, .option])
         }
     }
