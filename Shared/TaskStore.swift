@@ -852,37 +852,67 @@ final class TaskStore {
                             formatting: try NoteFormatting.decode(note.value(forKey: "formattingJSON") as? String, body: body))
     }
 
+    /// Strict read for backups, upgrades and checks: any unreadable record fails the whole read.
     func snapshots() throws -> [TaskSnapshot] {
+        try readSnapshots(strict: true).tasks
+    }
+
+    /// Display read for the app and widgets. A task with an unreadable record is left out
+    /// and counted, so one bad record cannot hide the rest. Nothing is modified or deleted.
+    func readableSnapshots() throws -> (tasks: [TaskSnapshot], unreadable: Int) {
+        try readSnapshots(strict: false)
+    }
+
+    private func readSnapshots(strict: Bool) throws -> (tasks: [TaskSnapshot], unreadable: Int) {
         let access = try sessionAccess()
         defer { withExtendedLifetime(access) {} }
         let context = try context
         context.refreshAllObjects()
+        var unreadable = 0      // records without a task identity
+        var broken = Set<UUID>() // tasks with at least one unreadable record
+        func skip(_ error: Error, task: UUID?) throws {
+            if strict { throw error }
+            if let task { broken.insert(task) } else { unreadable += 1 }
+        }
         let notes = try context.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskNoteRevision"))
         var revisions: [UUID: NoteRevision] = [:]
         for note in notes {
-            let value = try readRevision(note)
+            let value: NoteRevision
+            do { value = try readRevision(note) } catch {
+                try skip(error, task: note.value(forKey: "taskID") as? UUID)
+                continue
+            }
             let id = value.id
             if let previous = revisions[id] {
                 guard previous.body == value.body, previous.formatting == value.formatting,
                       previous.taskID == value.taskID, Set(previous.parentIDs) == Set(value.parentIDs) else {
-                    throw PrototypeError.invalid("正文身份冲突；原记录保留，请检查诊断。")
+                    try skip(PrototypeError.invalid("正文身份冲突；原记录保留，请检查诊断。"), task: value.taskID)
+                    broken.insert(previous.taskID)
+                    continue
                 }
                 if previous.createdAt <= value.createdAt { continue }
             }
             revisions[id] = value
         }
-        try NoteRevision.validateGraph(Array(revisions.values))
         let revisionsByTask = Dictionary(grouping: revisions.values, by: \.taskID)
+        if strict {
+            try NoteRevision.validateGraph(Array(revisions.values))
+        } else {
+            for (task, values) in revisionsByTask where (try? NoteRevision.validateGraph(values)) == nil {
+                broken.insert(task)
+            }
+        }
         let objects = try context.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskItem"))
         var groups: [UUID: [NSManagedObject]] = [:]
         for object in objects {
             guard let id = object.value(forKey: "id") as? UUID else {
-                throw PrototypeError.unavailable("任务身份尚未到达，等待同步；记录已保留。")
+                try skip(PrototypeError.unavailable("任务身份尚未到达，等待同步；记录已保留。"), task: nil)
+                continue
             }
             groups[id, default: []].append(object)
         }
         var results: [TaskSnapshot] = []
-        for (id, group) in groups {
+        for (id, group) in groups where !broken.contains(id) {
             // CloudKit has no unique constraint. The record key gives all devices a stable projection.
             let object = group.sorted {
                 ($0.value(forKey: "recordKey") as? String ?? "") < ($1.value(forKey: "recordKey") as? String ?? "")
@@ -891,16 +921,22 @@ final class TaskStore {
                   let createdAt = object.value(forKey: "createdAt") as? Date,
                   let updatedAt = object.value(forKey: "updatedAt") as? Date,
                   let scheduleJSON = object.value(forKey: "scheduleJSON") as? String else {
-                throw PrototypeError.unavailable("任务字段尚不完整，等待同步；记录已保留。")
+                try skip(PrototypeError.unavailable("任务字段尚不完整，等待同步；记录已保留。"), task: id)
+                continue
             }
-            let schedule = try JSONDecoder().decode(TaskSchedule.self, from: Data(scheduleJSON.utf8)).validated()
+            let schedule: TaskSchedule
+            do { schedule = try JSONDecoder().decode(TaskSchedule.self, from: Data(scheduleJSON.utf8)).validated() }
+            catch { try skip(error, task: id); continue }
             results.append(TaskSnapshot(id: id, title: title, createdAt: createdAt, updatedAt: updatedAt,
                                         completedAt: object.value(forKey: "completedAt") as? Date,
                                         deletedAt: group.compactMap { $0.value(forKey: "deletedAt") as? Date }.min(),
                                         schedule: schedule, currentRevisionID: object.value(forKey: "currentRevisionID") as? UUID,
                                         revisions: (revisionsByTask[id] ?? []).sorted { $0.id.uuidString < $1.id.uuidString }))
         }
-        return results.sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
+        // Count only tasks that exist; orphan notes of a task still syncing are not a task to report.
+        let skipped = unreadable + broken.intersection(groups.keys).count
+        let tasks = results.sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
+        return (tasks, skipped)
     }
 
     func archive() throws -> TaskArchive {

@@ -9,6 +9,8 @@ import EventKit
 @MainActor
 final class PrototypeModel: ObservableObject {
     @Published var tasks: [TaskSnapshot] = []
+    /// Tasks left out of `tasks` because a record could not be read; their records stay untouched.
+    @Published private(set) var unreadableTasks = 0
     @Published var status = "正在打开任务库…"
     @Published var error: String?
     @Published var selection: UUID?
@@ -128,6 +130,7 @@ final class PrototypeModel: ObservableObject {
         completionFeedback = nil
         loaded = false
         tasks = []
+        unreadableTasks = 0
         selection = nil
         storePath = ""
         session = nil
@@ -197,7 +200,7 @@ final class PrototypeModel: ObservableObject {
             try opened.consumeHistory()
             // reload() presents read errors without throwing. Confirm the first
             // distribution read before remembering a successful startup.
-            if StoreSession.isMacDistributionBuild { _ = try opened.snapshots() }
+            if StoreSession.isMacDistributionBuild { _ = try opened.readableSnapshots() }
             reload()
             if selection == nil, previousPath == storePath,
                let previousSelection, tasks.contains(where: { $0.id == previousSelection }) {
@@ -214,6 +217,7 @@ final class PrototypeModel: ObservableObject {
             try? store?.close()
             store = nil
             tasks = []
+            unreadableTasks = 0
             selection = nil
             storePath = ""
             self.session = nil
@@ -231,7 +235,9 @@ final class PrototypeModel: ObservableObject {
     func reload() {
         do {
             guard let store else { return }
-            tasks = try store.snapshots()
+            let read = try store.readableSnapshots()
+            tasks = read.tasks
+            unreadableTasks = read.unreadable
             if let id = taskToOpen {
                 taskToOpen = nil
                 if tasks.contains(where: { $0.id == id }) { selection = id }
@@ -243,6 +249,7 @@ final class PrototypeModel: ObservableObject {
             WidgetCenter.shared.reloadAllTimelines()
         } catch {
             tasks = []
+            unreadableTasks = 0
             selection = nil
             self.error = error.localizedDescription
         }
