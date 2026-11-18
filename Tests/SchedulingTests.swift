@@ -325,3 +325,70 @@ final class SchedulingTests: XCTestCase {
         return calendar.component(.minute, from: date)
     }
 }
+
+final class TitleDateTests: XCTestCase {
+    private func plan(_ title: String, today: String = "2026-11-18") throws -> TaskSchedule? {
+        TitleDate.schedule(in: title, today: try Day(today))
+    }
+
+    private func day(_ raw: String) throws -> TaskSchedule { .singleDay(try Day(raw)) }
+
+    func testRelativeDaysAtEitherEndOfTitle() throws {
+        XCTAssertEqual(try plan("今天整理书架"), try day("2026-11-18"))
+        XCTAssertEqual(try plan("买菜 明天"), try day("2026-11-19"))
+        XCTAssertEqual(try plan("后天交报告"), try day("2026-11-20"))
+        XCTAssertEqual(try plan("大后天出发"), try day("2026-11-21"))
+        XCTAssertNil(try plan("整理书架"))
+        XCTAssertNil(try plan("想想明天以后的事"))
+        XCTAssertNil(try plan("   "))
+    }
+
+    func testWeekdaysMeanTheNextSuchDayUnlessAWeekIsNamed() throws {
+        // 2026-11-18 is a Wednesday.
+        XCTAssertEqual(try plan("周五买菜"), try day("2026-11-20"))
+        XCTAssertEqual(try plan("周三开会"), try day("2026-11-18"))
+        XCTAssertEqual(try plan("周一开会"), try day("2026-11-23"))
+        XCTAssertEqual(try plan("星期天爬山"), try day("2026-11-22"))
+        XCTAssertEqual(try plan("这周一复盘"), try day("2026-11-16"))
+        XCTAssertEqual(try plan("下周五聚餐"), try day("2026-11-27"))
+        XCTAssertEqual(try plan("礼拜六 洗车"), try day("2026-11-21"))
+        XCTAssertEqual(try plan("周末去公园走走"), try day("2026-11-21"))
+        XCTAssertEqual(try plan("周末去公园", today: "2026-11-22"), try day("2026-11-22"))
+        XCTAssertEqual(try plan("下周末露营"), try day("2026-11-28"))
+    }
+
+    func testWholeWeekPhrasesUseTheWeekPlan() throws {
+        XCTAssertEqual(try plan("本周写周报"), .week(start: try Day("2026-11-16")))
+        XCTAssertEqual(try plan("读完这本书 下周"), .week(start: try Day("2026-11-23")))
+        XCTAssertEqual(try plan("这周末之前"), try day("2026-11-21"))
+    }
+
+    func testMonthDayRollsToNextYearAndRejectsInvalidDates() throws {
+        XCTAssertEqual(try plan("11月20日交报告"), try day("2026-11-20"))
+        XCTAssertEqual(try plan("交报告 11/20"), try day("2026-11-20"))
+        XCTAssertEqual(try plan("1月3号 体检"), try day("2027-01-03"))
+        XCTAssertEqual(try plan("提交材料 11月18"), try day("2026-11-18"))
+        XCTAssertNil(try plan("2月30日"))
+        XCTAssertNil(try plan("编号 2025/11"))
+        XCTAssertNil(try plan("123/4 节"))
+        XCTAssertNil(try plan("11/200 页校对"))
+        XCTAssertNil(try plan("核对合同 2028/11/20"))
+        XCTAssertNil(try plan("核对合同 2028年11月20日"))
+        XCTAssertNil(try plan("11/20/2028 到期"))
+        XCTAssertEqual(try plan("2月29日体检", today: "2027-11-18"), try day("2028-02-29"))
+        XCTAssertEqual(try plan("2月29日体检", today: "2028-02-29"), try day("2028-02-29"))
+    }
+
+    func testWeekendHasItsOwnMeaningAndUnsupportedQualifiersYieldNothing() throws {
+        // 2026-11-22 is a Sunday.
+        XCTAssertEqual(try plan("周六买菜", today: "2026-11-22"), try day("2026-11-28"))
+        XCTAssertEqual(try plan("本周末买菜", today: "2026-11-22"), try day("2026-11-22"))
+        XCTAssertEqual(try plan("周末买菜", today: "2026-11-21"), try day("2026-11-21"))
+        XCTAssertEqual(try plan("下周末露营", today: "2026-11-22"), try day("2026-11-28"))
+        XCTAssertNil(try plan("整理照片 上周五"))
+        XCTAssertNil(try plan("开会 每周五"))
+        XCTAssertNil(try plan("复盘 下下周"))
+        XCTAssertEqual(try plan("交报告，下周五。"), try day("2026-11-27"))
+        XCTAssertEqual(try plan("「明天」买菜"), try day("2026-11-19"))
+    }
+}

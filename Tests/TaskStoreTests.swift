@@ -222,6 +222,62 @@ final class TaskStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testCaptureTitleDateYieldsToExplicitChoicesAndSurvivesRestart() throws {
+        try withStore { store in
+            let wednesday = try Day("2026-11-18")
+            let today = TaskSchedule.singleDay(wednesday)
+            let tomorrow = TaskSchedule.singleDay(wednesday.adding(days: 1))
+            let draft = CaptureDraft()
+            draft.today = { wednesday }
+            draft.attach(to: store, tasks: [])
+            draft.begin(schedule: .none)
+            // Any entry edits `content`; the full editor changes the whole value at once.
+            draft.content.title = "明天买菜"
+            XCTAssertEqual(draft.plan.schedule, tomorrow)
+            XCTAssertTrue(draft.dateFromTitle)
+            XCTAssertEqual(try store.drafts().first?.captureSchedule, tomorrow)
+            XCTAssertEqual(try store.drafts().first?.captureScheduleFromTitle, true)
+            draft.content = TaskWriting(title: "买菜", body: "完整编辑器")
+            XCTAssertEqual(draft.plan.schedule, .none)
+            XCTAssertFalse(draft.dateFromTitle)
+
+            // A restored suggestion is still a suggestion.
+            draft.content.title = "明天买菜"
+            draft.detach()
+            let restored = CaptureDraft()
+            restored.today = { wednesday }
+            restored.attach(to: store, tasks: [])
+            restored.begin(schedule: .none)
+            XCTAssertEqual(restored.plan.schedule, tomorrow)
+            restored.content.title = "买菜"
+            XCTAssertEqual(restored.plan.schedule, .none)
+
+            // Declining applies to this draft only.
+            restored.begin(schedule: today)
+            restored.content.title = "周五买菜"
+            restored.ignoreTitleDate()
+            XCTAssertEqual(restored.plan.schedule, today)
+            restored.content.title = "周五买菜 明天"
+            XCTAssertEqual(restored.plan.schedule, today)
+            restored.content = TaskWriting()
+            restored.begin(schedule: today)
+            restored.content.title = "后天交报告"
+            XCTAssertEqual(restored.plan.schedule, .singleDay(wednesday.adding(days: 2)))
+
+            // A date the user picked wins over the title, before or after typing.
+            restored.content = TaskWriting()
+            restored.plan = ScheduleForm(schedule: .none)
+            restored.content.title = "后天交报告"
+            XCTAssertEqual(restored.plan.schedule, .none)
+            restored.content.title = "明天交报告"
+            restored.plan = ScheduleForm(schedule: today)
+            restored.content.title = "后天交报告"
+            XCTAssertEqual(restored.plan.schedule, today)
+            restored.detach()
+        }
+    }
+
+    @MainActor
     func testCaptureRefreshesImplicitDateBeforeTypingAndThenKeepsTheDraftDate() throws {
         try withStore { store in
             let draft = CaptureDraft()
