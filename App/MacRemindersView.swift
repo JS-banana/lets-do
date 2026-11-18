@@ -1,6 +1,26 @@
 #if os(macOS)
 import SwiftUI
 
+/// Import stays a quiet icon until the connected list has reminders to bring in.
+struct MacReminderImportEntry: View {
+    @ObservedObject var reminders: MacReminders
+    let open: () -> Void
+
+    var body: some View {
+        let count = reminders.selectedListID == nil ? 0 : reminders.candidates.count
+        if count > 0 {
+            Button("提醒事项有 \(count) 条新事项", systemImage: "tray.and.arrow.down.fill", action: open)
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("reminderImportNew")
+        } else {
+            Button("从提醒事项导入", systemImage: "tray.and.arrow.down", action: open)
+                .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.secondary)
+                .help("从提醒事项导入")
+                .accessibilityIdentifier("reminderImport")
+        }
+    }
+}
+
 struct MacReminderImportView: View {
     @ObservedObject var reminders: MacReminders
     @Environment(\.dismiss) private var dismiss

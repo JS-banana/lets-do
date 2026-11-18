@@ -73,6 +73,8 @@ private struct TaskCommands: Commands {
                 .disabled(newTask == nil)
             Button("新建窗口") { openWindow(id: "main") }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("快速记录") { openWindow(id: "capture", value: "capture") }
+                .keyboardShortcut("n", modifiers: [.control, .option])
         }
     }
 }
