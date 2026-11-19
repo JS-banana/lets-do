@@ -37,7 +37,7 @@ struct TodoApp: App {
             CommandGroup(after: .appInfo) {
                 if updates.available {
                     Button("检查更新…") { updates.check() }
-                    Toggle("自动检查更新", isOn: Binding(get: { updates.automatic }, set: updates.setAutomatic))
+                    Toggle("自动检查更新", isOn: $updates.automatic)
                 }
             }
             #endif
