@@ -8,22 +8,22 @@ final class StoreFileLock {
 
     init(url: URL, mode: Int32) throws {
         let descriptor = open(url.path, O_CREAT | O_RDWR, 0o600)
-        guard descriptor >= 0 else { throw PrototypeError.unavailable("无法锁定共享存储；原库未改动。") }
+        guard descriptor >= 0 else { throw AppError.unavailable("无法锁定共享存储；原库未改动。") }
         guard flock(descriptor, mode | LOCK_NB) == 0 else {
             Darwin.close(descriptor)
-            throw PrototypeError.busy
+            throw AppError.busy
         }
         self.descriptor = descriptor
     }
 
     func changeMode(_ mode: Int32) throws {
-        guard flock(descriptor, mode | LOCK_NB) == 0 else { throw PrototypeError.busy }
+        guard flock(descriptor, mode | LOCK_NB) == 0 else { throw AppError.busy }
     }
 
     deinit { flock(descriptor, LOCK_UN); Darwin.close(descriptor) }
 }
 
-enum PrototypeError: LocalizedError {
+enum AppError: LocalizedError {
     case invalid(String)
     case unavailable(String)
     case missingTask
@@ -81,7 +81,7 @@ struct StoreSession: Codable, Equatable, Sendable {
               appIdentifier.range(of: "^[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+\\z", options: .regularExpression) != nil,
               widgetIdentifier == appIdentifier + ".widget",
               applicationSupport.isFileURL, userHome.isFileURL else {
-            throw PrototypeError.invalid("本机分发版的应用与小组件身份配置不匹配；没有选择其他任务库。")
+            throw AppError.invalid("本机分发版的应用与小组件身份配置不匹配；没有选择其他任务库。")
         }
         let support: URL
         switch bundleIdentifier {
@@ -92,7 +92,7 @@ struct StoreSession: Codable, Equatable, Sendable {
                 .appendingPathComponent(widgetIdentifier, isDirectory: true)
                 .appendingPathComponent("Data/Library/Application Support", isDirectory: true)
         default:
-            throw PrototypeError.invalid("无法确认本机分发版的进程身份；没有选择其他任务库。")
+            throw AppError.invalid("无法确认本机分发版的进程身份；没有选择其他任务库。")
         }
         return try checkedDirectory(support.appendingPathComponent("LetsDo/MacDistribution", isDirectory: true))
     }
@@ -102,7 +102,7 @@ struct StoreSession: Codable, Equatable, Sendable {
         var info = stat()
         if lstat(url.path, &info) == 0 {
             guard info.st_mode & S_IFMT == S_IFDIR else {
-                throw PrototypeError.unavailable("任务库路径不是普通目录，请检查存储位置。")
+                throw AppError.unavailable("任务库路径不是普通目录，请检查存储位置。")
             }
         } else if errno != ENOENT {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
@@ -113,7 +113,7 @@ struct StoreSession: Codable, Equatable, Sendable {
     func directory() throws -> URL {
         guard modelVersion == Self.modelVersion,
               namespace.range(of: "^[a-zA-Z0-9-]{1,100}$", options: .regularExpression) != nil else {
-            throw PrototypeError.invalid("存储版本或命名空间不兼容，请打开主应用。")
+            throw AppError.invalid("存储版本或命名空间不兼容，请打开主应用。")
         }
         let base = try Self.baseURL()
         if Self.isMacDistributionBuild { return try distributionDirectory(at: base) }
@@ -122,7 +122,7 @@ struct StoreSession: Codable, Equatable, Sendable {
 
     func distributionDirectory(at base: URL) throws -> URL {
         guard Self.validDistributionNamespace(namespace) else {
-            throw PrototypeError.invalid("无效的分发任务库名称。")
+            throw AppError.invalid("无效的分发任务库名称。")
         }
         return try Self.checkedDirectory(base.appendingPathComponent(namespace, isDirectory: true))
     }
@@ -154,7 +154,7 @@ struct StoreSession: Codable, Equatable, Sendable {
         guard let index = markers.first else { return nil }
         guard markers.count == 1, arguments[index] == "-LetsDoRun", index + 1 < arguments.count,
               validDistributionRunName(arguments[index + 1]) else {
-            throw PrototypeError.invalid("-LetsDoRun 需要一个以字母或数字开头、最多 70 个字母数字或连字符的独立名称，不能使用保留名称 manual；没有使用默认任务库。")
+            throw AppError.invalid("-LetsDoRun 需要一个以字母或数字开头、最多 70 个字母数字或连字符的独立名称，不能使用保留名称 manual；没有使用默认任务库。")
         }
         return arguments[index + 1]
     }
@@ -191,12 +191,12 @@ struct StoreSession: Codable, Equatable, Sendable {
         if let previous {
             guard (1...modelVersion).contains(previous.modelVersion),
                   validDistributionNamespace(previous.namespace) else {
-                throw PrototypeError.unavailable("桌面任务库记录不兼容，原库与草稿已保留。")
+                throw AppError.unavailable("桌面任务库记录不兼容，原库与草稿已保留。")
             }
         }
         guard let run else { return previous?.namespace ?? "dist-manual" }
         guard validDistributionRunName(run) else {
-            throw PrototypeError.invalid("无效的桌面测试库名称。")
+            throw AppError.invalid("无效的桌面测试库名称。")
         }
         return "dist-\(run)"
     }
@@ -204,7 +204,7 @@ struct StoreSession: Codable, Equatable, Sendable {
     static func forMainApp(blockedSession: StoreSession?) throws -> StoreSession {
         if isLocalBuild { return local() }
         guard let blockedSession, !blockedSession.ready, blockedSession.modelVersion == modelVersion else {
-            throw PrototypeError.unavailable("桌面任务库尚未完成本次启动检查。")
+            throw AppError.unavailable("桌面任务库尚未完成本次启动检查。")
         }
         let namespace = try distributionNamespace(run: nil, previous: blockedSession)
         return StoreSession(modelVersion: modelVersion, namespace: namespace, ready: true)
@@ -212,15 +212,15 @@ struct StoreSession: Codable, Equatable, Sendable {
 
     static func forExtension() throws -> StoreSession {
         guard !isLocalBuild else {
-            throw PrototypeError.unavailable("请使用桌面本机版添加系统小组件。")
+            throw AppError.unavailable("请使用桌面本机版添加系统小组件。")
         }
         let base = try baseURL()
         let session = try readPublished(at: base)
         guard session.ready, session.modelVersion == modelVersion else {
-            throw PrototypeError.unavailable("请先打开主应用完成存储与模型检查。")
+            throw AppError.unavailable("请先打开主应用完成存储与模型检查。")
         }
         guard try readPublished(at: base) == session else {
-            throw PrototypeError.unavailable("桌面任务库已切换，请刷新小组件；没有访问其他任务库。")
+            throw AppError.unavailable("桌面任务库已切换，请刷新小组件；没有访问其他任务库。")
         }
         _ = try session.distributionDirectory(at: base)
         return session

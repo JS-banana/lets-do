@@ -3,7 +3,7 @@ import SwiftUI
 
 @main
 struct TodoApp: App {
-    @StateObject private var model = PrototypeModel()
+    @StateObject private var model = AppModel()
     #if MAC_DISTRIBUTION
     @StateObject private var updates = MacUpdates()
     #endif
@@ -12,7 +12,7 @@ struct TodoApp: App {
 
     var body: some Scene {
         WindowGroup("Let’s Do", id: "main") {
-            PrototypeView(model: model)
+            MainView(model: model)
                 .task {
                     // Hosted tests open their own temporary TaskStore instances.
                     guard !isUnitTestHost else { return }
@@ -70,7 +70,7 @@ extension FocusedValues {
 }
 
 private struct TaskCommands: Commands {
-    let model: PrototypeModel
+    let model: AppModel
     @FocusedValue(\.newTask) private var newTask
     @Environment(\.openWindow) private var openWindow
 

@@ -2,7 +2,7 @@ import SwiftUI
 import WidgetKit
 
 struct WidgetGalleryView: View {
-    @ObservedObject var model: PrototypeModel
+    @ObservedObject var model: AppModel
     let open: (URL) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme

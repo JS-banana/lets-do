@@ -30,13 +30,13 @@ private final class ReminderSourceStub: MacReminderSource {
         return items.filter { $0.scope == scope && (includingCompleted || !$0.completed) }
     }
     func create(title: String, due: Day?, marker: URL, in scope: MacReminderScope) throws -> MacReminderCandidate {
-        if failBeforeSave { throw PrototypeError.unavailable("simulated interruption before system save") }
+        if failBeforeSave { throw AppError.unavailable("simulated interruption before system save") }
         sends += 1
         lastDue = due
         let item = MacReminderCandidate(id: "local-\(sends)", externalID: "external-\(sends)", scope: scope,
                                         title: title, notes: "", completed: false, marker: marker)
         items.append(item)
-        if failAfterSave { throw PrototypeError.unavailable("simulated ambiguous save") }
+        if failAfterSave { throw AppError.unavailable("simulated ambiguous save") }
         return item
     }
 
@@ -377,7 +377,7 @@ final class MacRemindersTests: XCTestCase {
                 defer { withExtendedLifetime(lock) {} }
                 await tool.refresh()
                 XCTAssertFalse(try XCTUnwrap(store.snapshots().first).isCompleted)
-                XCTAssertEqual(tool.message, PrototypeError.busy.localizedDescription)
+                XCTAssertEqual(tool.message, AppError.busy.localizedDescription)
             }
             let schedule = TaskSchedule.week(start: try Day("2026-11-09"))
             try store.updateTitle(id: id, title: "改过的标题")

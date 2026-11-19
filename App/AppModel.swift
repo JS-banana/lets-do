@@ -4,7 +4,7 @@ import WidgetKit
 import EventKit
 
 @MainActor
-final class PrototypeModel: ObservableObject {
+final class AppModel: ObservableObject {
     @Published var tasks: [TaskSnapshot] = []
     /// Tasks left out of `tasks` because a record could not be read; their records stay untouched.
     @Published private(set) var unreadableTasks = 0
@@ -84,7 +84,7 @@ final class PrototypeModel: ObservableObject {
                 // incompatible or damaged library, so startup fails and extensions stay blocked.
                 let first = try opened.readableSnapshots()
                 if first.tasks.isEmpty && first.unreadableCount > 0 {
-                    throw PrototypeError.unavailable("任务库中的任务都无法读取，可能来自更新的版本或已经损坏；没有写入。")
+                    throw AppError.unavailable("任务库中的任务都无法读取，可能来自更新的版本或已经损坏；没有写入。")
                 }
             }
             reload()
@@ -154,7 +154,7 @@ final class PrototypeModel: ObservableObject {
     @discardableResult
     func perform(_ action: (TaskStore) throws -> Void) -> Bool {
         do {
-            guard let store, loaded else { throw PrototypeError.unavailable("存储尚未就绪，请稍后重试。") }
+            guard let store, loaded else { throw AppError.unavailable("存储尚未就绪，请稍后重试。") }
             // TaskStore synchronously publishes committed snapshots before returning.
             try action(store)
             return true
