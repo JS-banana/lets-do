@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A date's tasks stay inside the current calendar, rather than becoming a third workspace.
 struct CalendarDayTasks: View {
-    @ObservedObject var model: PrototypeModel
+    @ObservedObject var model: AppModel
     let day: Day
     let create: () -> Void
     let close: () -> Void
