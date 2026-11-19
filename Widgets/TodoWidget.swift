@@ -65,7 +65,7 @@ struct TaskWidgetView: View {
 
 struct TodayTasksWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "TodoM0Tasks", provider: TaskProvider()) { TaskWidgetView(entry: $0) }
+        StaticConfiguration(kind: "LetsDoToday", provider: TaskProvider()) { TaskWidgetView(entry: $0) }
             .configurationDisplayName("今天的任务")
             .description("查看今天和此前未完成的任务，直接勾选完成，或快速记下新的待办。")
             .contentMarginsDisabled()
@@ -75,7 +75,7 @@ struct TodayTasksWidget: Widget {
 
 struct WeekPlanWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "TodoM0Week", provider: TaskProvider()) { TaskWidgetView(entry: $0, mode: .week) }
+        StaticConfiguration(kind: "LetsDoWeek", provider: TaskProvider()) { TaskWidgetView(entry: $0, mode: .week) }
             .configurationDisplayName("本周计划")
             .description("查看周一至周日的安排和本周尚未完成的任务，点击日期打开当天清单。")
             .contentMarginsDisabled()
@@ -85,7 +85,7 @@ struct WeekPlanWidget: Widget {
 
 struct MonthPlanWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "TodoM0Month", provider: TaskProvider()) { TaskWidgetView(entry: $0, mode: .month) }
+        StaticConfiguration(kind: "LetsDoMonth", provider: TaskProvider()) { TaskWidgetView(entry: $0, mode: .month) }
             .configurationDisplayName("月历总览")
             .description("查看整月的任务分布，点击日期继续安排。")
             .contentMarginsDisabled()

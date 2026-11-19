@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key><string>com.panion.todo.m0.mac.updater</string>
+    <key>CFBundleIdentifier</key><string>com.panion.letsdo.updater</string>
     <key>CFBundleExecutable</key><string>Update</string>
     <key>CFBundleName</key><string>Let’s Do 更新</string>
     <key>CFBundlePackageType</key><string>APPL</string>

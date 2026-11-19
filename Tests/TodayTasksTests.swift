@@ -1,5 +1,5 @@
 import XCTest
-@testable import TodoM0
+@testable import LetsDo
 
 final class TodayTasksTests: XCTestCase {
     private func task(_ title: String, _ schedule: TaskSchedule, done: Bool = false) -> CalendarTask {

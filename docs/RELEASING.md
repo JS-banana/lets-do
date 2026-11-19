@@ -63,7 +63,7 @@ shasum -a 256 release-manifest.json
 
 ## Mac 应用内更新
 
-带更新助手的候选仍交付同一组四份资产。安装过该版本的用户可从应用菜单检查更新，或开启定期检查。v0.3.4 及之前的安装需先用 DMG 覆盖一次。
+带更新助手的候选仍交付同一组四份资产。安装过该版本的用户可从应用菜单检查更新，或开启定期检查。从 v0.3.x 升到 v0.4.0 时应用身份和任务库路径都会变化。v0.4.0 的发行说明须提醒用户先备份旧库，再手动下载安装 DMG、迁移任务库、重新授权提醒事项并添加小组件。
 
 **首次配置。** 在维护者 Mac 上运行以下命令，Sparkle 将该项目的 Ed25519 私钥保存在登录钥匙串。在 GitHub 仓库 Settings → Secrets and variables → Actions 中，将公钥设为变量 `SPARKLE_PUBLIC_ED_KEY`，将同一密钥的私钥设为 secret `SPARKLE_PRIVATE_ED_KEY`。密钥属于项目，长期备份，私钥不要放入源码、PR 或日志。公钥在合入后生成首份候选前配置，私钥在发布为 Latest 前配置。生成与导出选项见 [Sparkle 文档](https://sparkle-project.org/documentation/)。
 

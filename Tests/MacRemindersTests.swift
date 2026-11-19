@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 import XCTest
-@testable import TodoM0
+@testable import LetsDo
 
 @MainActor
 private final class ReminderSourceStub: MacReminderSource {

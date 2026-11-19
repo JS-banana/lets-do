@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import TodoM0
+@testable import LetsDo
 
 final class StoreSessionTests: XCTestCase {
     func testDistributionHostAndWidgetResolveOneIsolatedLibraryRoot() throws {
@@ -16,7 +16,7 @@ final class StoreSessionTests: XCTestCase {
             applicationSupport: widgetSupport, userHome: widgetSupport.deletingLastPathComponent().deletingLastPathComponent())
 
         XCTAssertEqual(host, widget)
-        XCTAssertEqual(host, widgetSupport.appendingPathComponent("TodoM0/MacDistribution", isDirectory: true))
+        XCTAssertEqual(host, widgetSupport.appendingPathComponent("LetsDo/MacDistribution", isDirectory: true))
         XCTAssertFalse(host.path.contains("Group Containers"))
     }
 
@@ -33,7 +33,7 @@ final class StoreSessionTests: XCTestCase {
             ("../app", "../app", "../app.widget"),
             ("com..app", "com..app", "com..app.widget"),
             (appID + "\n", appID + "\n", appID + "\n.widget"),
-            ("$(M0_APP_ID)", "$(M0_APP_ID)", "$(M0_APP_ID).widget")
+            ("$(LETSDO_APP_IDENTIFIER)", "$(LETSDO_APP_IDENTIFIER)", "$(LETSDO_APP_IDENTIFIER).widget")
         ] as [(String?, String?, String?)] {
             XCTAssertThrowsError(try StoreSession.distributionBaseURL(
                 bundleIdentifier: bundle, appIdentifier: app, widgetIdentifier: widget,
@@ -44,16 +44,16 @@ final class StoreSessionTests: XCTestCase {
     func testDistributionRunNameRejectsAmbiguousArgumentsAndKeepsColdLaunchSelection() throws {
         XCTAssertNil(try StoreSession.distributionRunName(arguments: ["app"]))
         for valid in ["a", "capture-01", String(repeating: "a", count: 70)] {
-            XCTAssertEqual(try StoreSession.distributionRunName(arguments: ["app", "-M0Run", valid]), valid)
+            XCTAssertEqual(try StoreSession.distributionRunName(arguments: ["app", "-LetsDoRun", valid]), valid)
         }
         for invalid in [
-            ["app", "-M0Run"], ["app", "-M0Run", ""], ["app", "-M0Run", "../manual"],
-            ["app", "-M0Run", "-NSDocumentRevisionsDebugMode", "YES"],
-            ["app", "-M0Run", String(repeating: "a", count: 71)],
-            ["app", "-M0Run", "one", "-M0Run", "one"],
-            ["app", "-M0Run", "one", "-M0Run", "two"], ["app", "-M0Run=one"],
-            ["app", "-M0Run", "one\n"], ["app", "-M0Run", "manual"],
-            ["app", "-M0Run", "MANUAL"], ["app", "-M0Run", "mAnUaL"]
+            ["app", "-LetsDoRun"], ["app", "-LetsDoRun", ""], ["app", "-LetsDoRun", "../manual"],
+            ["app", "-LetsDoRun", "-NSDocumentRevisionsDebugMode", "YES"],
+            ["app", "-LetsDoRun", String(repeating: "a", count: 71)],
+            ["app", "-LetsDoRun", "one", "-LetsDoRun", "one"],
+            ["app", "-LetsDoRun", "one", "-LetsDoRun", "two"], ["app", "-LetsDoRun=one"],
+            ["app", "-LetsDoRun", "one\n"], ["app", "-LetsDoRun", "manual"],
+            ["app", "-LetsDoRun", "MANUAL"], ["app", "-LetsDoRun", "mAnUaL"]
         ] {
             XCTAssertThrowsError(try StoreSession.distributionRunName(arguments: invalid))
         }
@@ -109,7 +109,7 @@ final class StoreSessionTests: XCTestCase {
 
     @MainActor
     func testSessionSwitchPreservesLibrariesDraftsAndBlocksOldWriters() throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Modes-\(UUID().uuidString)")
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("LetsDoModes-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
         let local = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-first", ready: true)

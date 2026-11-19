@@ -210,7 +210,7 @@ struct PrototypeView: View {
         }
         .focusedSceneValue(\.newTask, newTaskAction)
         .task {
-            guard ProcessInfo.processInfo.environment["M0_UNIT_TEST_HOST"] != "1" else { return }
+            guard ProcessInfo.processInfo.environment["LETSDO_UNIT_TEST_HOST"] != "1" else { return }
             GlobalCaptureHotKey.shared.install { [openWindow, model] in model.openQuickCapture(openWindow) }
         }
     }

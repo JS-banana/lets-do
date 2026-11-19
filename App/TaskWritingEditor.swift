@@ -4,7 +4,7 @@ import SwiftUI
 import AppKit
 
 // Track intentional body bold separately from the title font and dynamic type size.
-private let writingBoldAttribute = NSAttributedString.Key("TodoM0BodyBold")
+private let writingBoldAttribute = NSAttributedString.Key("LetsDoBodyBold")
 
 private func writingParagraphStyle(title: Bool) -> NSParagraphStyle {
     let style = NSMutableParagraphStyle()

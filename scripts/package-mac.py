@@ -184,20 +184,20 @@ try:
     require(output.suffix.lower() == ".dmg", "--output must name a .dmg file.")
     require(not any(path.exists() or path.is_symlink() for path in (output, archive, manifest_path, sums_path)),
             "An output asset already exists; choose a new directory.")
-    require(re.search(r"(?m)^\s*#if M0_DISTRIBUTION\s*$",
+    require(re.search(r"(?m)^\s*#if MAC_DISTRIBUTION\s*$",
                       (ROOT / "Shared" / "StoreSession.swift").read_text()),
             "The distribution storage macro changed; review packaging compilation conditions first.")
     run("xcode", ["xcodebuild", "-version"])
     run("mac-distribution-build", [
         "xcodebuild", "-project", "Todo.xcodeproj", "-jobs", "4",
-        "-scheme", "TodoM0Distribution", "-configuration", "MacDistribution",
+        "-scheme", "LetsDoDistribution", "-configuration", "MacDistribution",
         "-destination", "generic/platform=macOS", "-derivedDataPath", str(workspace / "DerivedData"),
         "build", "CODE_SIGNING_ALLOWED=NO",
         f"MARKETING_VERSION={version}", f"CURRENT_PROJECT_VERSION={build_number}",
     ])
     app = built_app
     require(app.is_dir(), "The Mac app is missing.")
-    widget = app / "Contents" / "PlugIns" / "TodoM0MacWidget.appex"
+    widget = app / "Contents" / "PlugIns" / "LetsDoWidget.appex"
     require(widget.is_dir() and not widget.is_symlink() and list(app.rglob("*.appex")) == [widget],
             "The download must embed exactly the native Mac Widget bundle.")
     info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
@@ -205,19 +205,19 @@ try:
     usage_key = "NSRemindersFullAccessUsageDescription"
     require(isinstance(info.get(usage_key), str) and info[usage_key].strip() and usage_key not in widget_info,
             "Only the Mac app must declare its Reminders usage.")
-    require(info.get("CFBundleIdentifier") == "com.panion.todo.m0.mac", "Unexpected distribution app identity.")
+    require(info.get("CFBundleIdentifier") == "com.panion.letsdo", "Unexpected distribution app identity.")
     require(widget_info.get("CFBundleIdentifier") == info["CFBundleIdentifier"] + ".widget", "Unexpected Widget identity.")
     for bundle_info in (info, widget_info):
         require(bundle_info.get("CFBundleShortVersionString") == version and bundle_info.get("CFBundleVersion") == build_number,
                 "The app and Widget must both use the expected marketing version and build number.")
     require(widget_info.get("NSExtension", {}).get("NSExtensionPointIdentifier") == "com.apple.widgetkit-extension",
             "The embedded extension is not a WidgetKit extension.")
-    require(any("todom0" in item.get("CFBundleURLSchemes", []) for item in info.get("CFBundleURLTypes", [])),
+    require(any("letsdo" in item.get("CFBundleURLSchemes", []) for item in info.get("CFBundleURLTypes", [])),
             "The app is missing its public URL registration.")
     for bundle, data in ((app, info), (widget, widget_info)):
-        require(data.get("M0DistributionAppIdentifier") == info["CFBundleIdentifier"] and
-                data.get("M0DistributionWidgetIdentifier") == widget_info["CFBundleIdentifier"] and
-                data.get("M0URLScheme") == "todom0", "Distribution storage and URL identities must match in both bundles.")
+        require(data.get("LetsDoAppIdentifier") == info["CFBundleIdentifier"] and
+                data.get("LetsDoWidgetIdentifier") == widget_info["CFBundleIdentifier"] and
+                data.get("LetsDoURLScheme") == "letsdo", "Distribution storage and URL identities must match in both bundles.")
         resources = bundle / "Contents" / "Resources"
         require((resources / "Model.momd").is_dir(), "A bundle is missing its versioned Core Data model.")
         metadata = json.loads((resources / "Metadata.appintents" / "extract.actionsdata").read_bytes())
@@ -330,11 +330,11 @@ finally:
             cleanup_code = report["results"][-1]["exitCode"]
             require(cleanup_code == 0 or cleanup_code == 1 and "-10814" in cleanup,
                     "Could not retire Xcode's temporary build app registration.")
-            built_widget = built_app / "Contents" / "PlugIns" / "TodoM0MacWidget.appex"
+            built_widget = built_app / "Contents" / "PlugIns" / "LetsDoWidget.appex"
             if built_widget.is_dir():
                 run("unregister-build-widget", ["pluginkit", "-r", str(built_widget)], allowed_failure=True)
                 listing = run("check-build-widget-registration",
-                              ["pluginkit", "-m", "-A", "-D", "-v", "-i", "com.panion.todo.m0.mac.widget"],
+                              ["pluginkit", "-m", "-A", "-D", "-v", "-i", "com.panion.letsdo.widget"],
                               capture=True)
                 require(str(built_widget) not in listing, "Xcode's build Widget is still registered.")
             report["buildRegistrationRemoved"] = True

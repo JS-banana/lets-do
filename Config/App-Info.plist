@@ -3,10 +3,9 @@
 <plist version="1.0"><dict>
     <key>CFBundleName</key><string>Let’s Do</string>
     <key>CFBundleDisplayName</key><string>Let’s Do</string>
-    <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>$(M0_URL_SCHEME)</string></array></dict></array>
-    <key>M0URLScheme</key><string>$(M0_URL_SCHEME)</string>
+    <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>$(LETSDO_URL_SCHEME)</string></array></dict></array>
+    <key>LetsDoURLScheme</key><string>$(LETSDO_URL_SCHEME)</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
-    <key>M0DistributionAppIdentifier</key><string>$(M0_DISTRIBUTION_APP_IDENTIFIER)</string>
-    <key>M0DistributionWidgetIdentifier</key><string>$(M0_DISTRIBUTION_WIDGET_IDENTIFIER)</string>
-    <key>M0ModelVersion</key><integer>2</integer>
+    <key>LetsDoAppIdentifier</key><string>$(LETSDO_APP_IDENTIFIER)</string>
+    <key>LetsDoWidgetIdentifier</key><string>$(LETSDO_WIDGET_IDENTIFIER)</string>
 </dict></plist>
