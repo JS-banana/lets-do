@@ -50,7 +50,7 @@ enum AppDestination: Equatable, Sendable {
             guard queries.isEmpty else { return nil }
             switch path {
             case ["today"]: self = .today
-            case ["todo"], ["inbox"]: self = .todo
+            case ["todo"]: self = .todo
             default: return nil
             }
         case "task":

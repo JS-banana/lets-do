@@ -784,11 +784,6 @@ struct PrototypeView: View {
         }.disabled(!model.loaded)
         Button("从 JSON 备份恢复…", systemImage: "square.and.arrow.down") { importing = true }
             .disabled(!model.loaded)
-        if StoreSession.isLocalBuild {
-            // Development builds only; release packages never offer fixture data.
-            Button("载入固定测试数据", systemImage: "testtube.2") { model.seed() }
-                .accessibilityIdentifier("seedFixtures").disabled(!model.loaded)
-        }
     }
 
     private var appVersion: String {

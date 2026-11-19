@@ -36,7 +36,6 @@ final class PrototypeModel: ObservableObject {
     private(set) var store: TaskStore?
     private var taskToOpen: UUID?
     private var waitingToOpenNoticeShown = false
-    private var startedDistributionDirectory: URL?
 
     var selected: TaskSnapshot? { tasks.first { $0.id == selection } }
     var active: [TaskSnapshot] { tasks.filter { $0.deletedAt == nil } }
@@ -73,21 +72,6 @@ final class PrototypeModel: ObservableObject {
             store = nil
             let session = try StoreSession.forMainApp(blockedSession: blockedSession)
             let directory = try session.directory()
-            if StoreSession.isMacDistributionBuild {
-                if let startedDistributionDirectory {
-                    guard startedDistributionDirectory == directory else {
-                        throw PrototypeError.unavailable("任务空间已切换，请退出并重新打开应用后检查新任务库；没有在运行中升级其他库。")
-                    }
-                } else {
-                    // Upgrade only before a successful startup. Same-library
-                    // restarts must not rely on detach() persisting a draft.
-                    let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                                              appropriateFor: nil, create: false)
-                    let source = try session.legacyLocalDirectory(applicationSupport: support,
-                                                                  arguments: ProcessInfo.processInfo.arguments)
-                    try LocalLibraryUpgrade.prepare(source: source, target: directory)
-                }
-            }
             let opened = try TaskStore(directory: directory, session: StoreSession.isLocalBuild ? nil : session)
             opened.onChange = { [weak self] in self?.reload() }
             opened.onHistoryReadFailure = { [weak self] in self?.status = "本机历史读取失败；本机数据保留" }
@@ -95,8 +79,6 @@ final class PrototypeModel: ObservableObject {
             storePath = directory.path
             if !StoreSession.isLocalBuild { try StoreSession.publish(session) }
             try opened.consumeHistory()
-            // reload() presents read errors without throwing. Confirm the first
-            // distribution read before remembering a successful startup.
             if StoreSession.isMacDistributionBuild {
                 // Some unreadable tasks still open the library; none readable at all suggests an
                 // incompatible or damaged library, so startup fails and extensions stay blocked.
@@ -115,7 +97,6 @@ final class PrototypeModel: ObservableObject {
             capture.attach(to: opened, tasks: tasks, skipping: unreadableIDs)
             reminders.attach(opened)
             Task { await reminders.refreshIfConnected() }
-            if StoreSession.isMacDistributionBuild { startedDistributionDirectory = directory }
         } catch {
             try? store?.close()
             store = nil
@@ -211,37 +192,6 @@ final class PrototypeModel: ObservableObject {
             let schedule: TaskSchedule = task.schedule == .none ? .allDay(start: day, endExclusive: day.adding(days: 1))
                 : try task.schedule.moved(to: day, displayTimeZone: .current)
             try store.scheduleTask(id: id, schedule: schedule)
-        }
-    }
-
-    func seed() {
-        perform { store in
-            let fixtures: [(String, String, String? , String?)] = [
-                ("00000000-0000-0000-0000-000000000001", "M0 · 上月跨入", "2026-09-30", "2026-10-03"),
-                ("00000000-0000-0000-0000-000000000002", "M0 · 跨周准备", "2026-10-17", "2026-10-22"),
-                ("00000000-0000-0000-0000-000000000003", "M0 · 阅读方案", "2026-10-19", "2026-10-20"),
-                ("00000000-0000-0000-0000-000000000004", "M0 · 本机重启检查", "2026-10-19", "2026-10-20"),
-                ("00000000-0000-0000-0000-000000000005", "M0 · 小组件待验", "2026-10-19", "2026-10-20"),
-                ("00000000-0000-0000-0000-000000000006", "M0 · 更多任务一", "2026-10-19", "2026-10-20"),
-                ("00000000-0000-0000-0000-000000000007", "M0 · 更多任务二", "2026-10-19", "2026-10-20"),
-                ("00000000-0000-0000-0000-000000000008", "M0 · 尚未安排", nil, nil),
-                ("00000000-0000-0000-0000-000000000009", "M0 · 跨年连续", "2026-12-30", "2027-01-03")
-            ]
-            for (key, title, start, end) in fixtures {
-                let id = UUID(uuidString: key)!
-                guard !tasks.contains(where: { $0.id == id }) else { continue }
-                try store.createTask(id: id, title: title)
-                if let start, let end {
-                    try store.scheduleTask(id: id, schedule: .allDay(start: Day(start), endExclusive: Day(end)))
-                }
-            }
-            let midnightID = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
-            if !tasks.contains(where: { $0.id == midnightID }) {
-                try store.createTask(id: midnightID, title: "M0 · 23:00 至零点")
-                let zone = TimeZone(identifier: "Asia/Shanghai")!
-                let start = try Day("2026-10-23").date(in: zone).addingTimeInterval(23 * 3_600)
-                try store.scheduleTask(id: midnightID, schedule: .timed(start: start, end: start.addingTimeInterval(3_600), timeZoneID: zone.identifier))
-            }
         }
     }
 }
