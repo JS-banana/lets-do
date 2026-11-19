@@ -61,21 +61,50 @@ final class StoreSessionTests: XCTestCase {
         XCTAssertEqual(try StoreSession.distributionNamespace(run: StoreSession.distributionRunName(arguments: ["app"]), previous: previous), previous.namespace)
     }
 
-    func testDistributionLegacyMappingNeverSelectsManualForAnExplicitRun() throws {
-        let support = URL(fileURLWithPath: "/isolated-home/Library/Application Support", isDirectory: true)
-        let isolated = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-capture-01", ready: true)
-        let manual = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-manual", ready: true)
-        XCTAssertEqual(try isolated.legacyLocalDirectory(applicationSupport: support, arguments: ["app", "-M0Run", "capture-01"]),
-                       support.appendingPathComponent("TodoM0/Local/local-capture-01", isDirectory: true))
-        XCTAssertEqual(try isolated.legacyLocalDirectory(applicationSupport: support, arguments: ["app"]).lastPathComponent, "local-capture-01")
-        XCTAssertEqual(try manual.legacyLocalDirectory(applicationSupport: support, arguments: ["app"]).lastPathComponent, "local-manual")
-        XCTAssertThrowsError(try manual.legacyLocalDirectory(applicationSupport: support, arguments: ["app", "-M0Run", "capture-01"]))
-        XCTAssertThrowsError(try isolated.legacyLocalDirectory(applicationSupport: support, arguments: ["app", "-M0Run"]))
-        for reserved in ["manual", "MANUAL", "mAnUaL"] {
-            XCTAssertThrowsError(try manual.legacyLocalDirectory(applicationSupport: support, arguments: ["app", "-M0Run", reserved]))
+    func testPublishedDistributionNamesRejectReservedVariantsAndMalformedRuns() throws {
+        for name in ["dist-MANUAL", "dist-mAnUaL", "dist--test", "dist-a\n", "dist-"] {
+            let previous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: name, ready: true)
+            XCTAssertThrowsError(try StoreSession.distributionNamespace(run: nil, previous: previous), name)
+            XCTAssertThrowsError(try previous.distributionDirectory(at: FileManager.default.temporaryDirectory), name)
         }
-        let ambiguous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-MANUAL", ready: true)
-        XCTAssertThrowsError(try ambiguous.legacyLocalDirectory(applicationSupport: support, arguments: ["app"]))
+        let manual = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-manual", ready: true)
+        XCTAssertEqual(try StoreSession.distributionNamespace(run: nil, previous: manual), "dist-manual")
+        XCTAssertThrowsError(try StoreSession.distributionNamespace(run: "manual", previous: nil))
+    }
+
+    func testDistributionPathsAllowNewDirectoriesAndRejectLinksAtEitherLevel() throws {
+        let fm = FileManager.default
+        let support = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fm.removeItem(at: support) }
+        let existing = support.appendingPathComponent("other-library", isDirectory: true)
+        try fm.createDirectory(at: existing, withIntermediateDirectories: true)
+        let session = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-check", ready: true)
+        func root() throws -> URL {
+            try StoreSession.distributionBaseURL(bundleIdentifier: "com.example.app.widget",
+                                                 appIdentifier: "com.example.app", widgetIdentifier: "com.example.app.widget",
+                                                 applicationSupport: support, userHome: support)
+        }
+        let base = try root()
+        let library = try session.distributionDirectory(at: base)
+        XCTAssertFalse(fm.fileExists(atPath: base.path))
+        try fm.createDirectory(at: library, withIntermediateDirectories: true)
+        XCTAssertEqual(try session.distributionDirectory(at: root()), library)
+        try fm.removeItem(at: library)
+
+        // Check both a link to a directory and a dangling link before anything is created.
+        for destination in [existing, support.appendingPathComponent("absent")] {
+            try fm.createSymbolicLink(at: library, withDestinationURL: destination)
+            XCTAssertThrowsError(try session.distributionDirectory(at: root()))
+            try fm.removeItem(at: library)
+        }
+        try fm.removeItem(at: base)
+        for destination in [existing, support.appendingPathComponent("absent")] {
+            try fm.createSymbolicLink(at: base, withDestinationURL: destination)
+            XCTAssertThrowsError(try root())
+            try fm.removeItem(at: base)
+        }
+        XCTAssertTrue(try fm.contentsOfDirectory(atPath: existing.path).isEmpty)
+        XCTAssertFalse(fm.fileExists(atPath: support.appendingPathComponent("absent").path))
     }
 
     @MainActor

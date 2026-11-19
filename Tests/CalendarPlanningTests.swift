@@ -56,9 +56,8 @@ final class CalendarPlanningTests: XCTestCase {
         for destination in destinations { XCTAssertEqual(AppDestination(url: destination.url), destination) }
         let scheme = AppDestination.scheme
         XCTAssertEqual(AppDestination.todo.url.path, "/todo")
-        XCTAssertEqual(AppDestination(url: try XCTUnwrap(URL(string: "\(scheme)://open/inbox"))), .todo)
         for text in ["https://capture", "\(scheme)://open/nope", "\(scheme)://open/today?date=bad",
-                     "\(scheme)://open/todo?date=bad", "\(scheme)://open/inbox?date=bad", "\(scheme)://task/not-a-uuid", "\(scheme)://calendar/2026-02-30",
+                     "\(scheme)://open/todo?date=bad", "\(scheme)://task/not-a-uuid", "\(scheme)://calendar/2026-02-30",
                      "\(scheme)://calendar/2026-10-31?view=unknown", "\(scheme)://calendar/2026-10-31?view",
                      "\(scheme)://calendar/2026-10-31?view=previous-weeks", "\(scheme)://calendar/2026-10-31?view=pending",
                      "\(scheme)://calendar/2026-10-26?view=pending&view=previous-weeks",

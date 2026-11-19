@@ -85,7 +85,7 @@ struct StoreSession: Codable, Equatable, Sendable {
         return base.appendingPathComponent("TodoM0/Local", isDirectory: true)
     }
 
-    // Resolves one candidate location, without creating a container or claiming OS access to it.
+    // Resolve the shared root before reading or publishing a session there.
     static func distributionBaseURL(bundleIdentifier: String?, appIdentifier: String?, widgetIdentifier: String?,
                                     applicationSupport: URL, userHome: URL) throws -> URL {
         guard let appIdentifier, let widgetIdentifier,
@@ -105,7 +105,20 @@ struct StoreSession: Codable, Equatable, Sendable {
         default:
             throw PrototypeError.invalid("无法确认本机分发版的进程身份；没有选择其他任务库。")
         }
-        return support.appendingPathComponent("TodoM0/MacDistribution", isDirectory: true)
+        return try checkedDirectory(support.appendingPathComponent("TodoM0/MacDistribution", isDirectory: true))
+    }
+
+    // lstat inspects the directory entry itself, including dangling symbolic links.
+    private static func checkedDirectory(_ url: URL) throws -> URL {
+        var info = stat()
+        if lstat(url.path, &info) == 0 {
+            guard info.st_mode & S_IFMT == S_IFDIR else {
+                throw PrototypeError.unavailable("任务库路径不是普通目录，请检查存储位置。")
+            }
+        } else if errno != ENOENT {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        return url
     }
 
     func directory() throws -> URL {
@@ -113,7 +126,16 @@ struct StoreSession: Codable, Equatable, Sendable {
               namespace.range(of: "^[a-zA-Z0-9-]{1,100}$", options: .regularExpression) != nil else {
             throw PrototypeError.invalid("存储版本或命名空间不兼容，请打开主应用。")
         }
-        return try Self.baseURL().appendingPathComponent(namespace, isDirectory: true)
+        let base = try Self.baseURL()
+        if Self.isMacDistributionBuild { return try distributionDirectory(at: base) }
+        return base.appendingPathComponent(namespace, isDirectory: true)
+    }
+
+    func distributionDirectory(at base: URL) throws -> URL {
+        guard Self.validDistributionNamespace(namespace) else {
+            throw PrototypeError.invalid("无效的分发任务库名称。")
+        }
+        return try Self.checkedDirectory(base.appendingPathComponent(namespace, isDirectory: true))
     }
 
     static func local() -> StoreSession {
@@ -127,32 +149,25 @@ struct StoreSession: Codable, Equatable, Sendable {
         return run?.range(of: "^[a-zA-Z0-9-]{1,70}$", options: .regularExpression) != nil ? run : nil
     }
 
+    private static func validDistributionRunName(_ name: String) -> Bool {
+        name.range(of: "^[A-Za-z0-9][A-Za-z0-9-]{0,69}\\z", options: .regularExpression) != nil
+            && name.lowercased() != "manual"
+    }
+
+    private static func validDistributionNamespace(_ namespace: String) -> Bool {
+        if namespace == "dist-manual" { return true }
+        let prefix = "dist-"
+        return namespace.hasPrefix(prefix) && validDistributionRunName(String(namespace.dropFirst(prefix.count)))
+    }
+
     static func distributionRunName(arguments: [String]) throws -> String? {
         let markers = arguments.indices.dropFirst().filter { arguments[$0].hasPrefix("-M0Run") }
         guard let index = markers.first else { return nil }
         guard markers.count == 1, arguments[index] == "-M0Run", index + 1 < arguments.count,
-              arguments[index + 1].range(of: "^[A-Za-z0-9][A-Za-z0-9-]{0,69}\\z", options: .regularExpression) != nil,
-              arguments[index + 1].lowercased() != "manual" else {
+              validDistributionRunName(arguments[index + 1]) else {
             throw PrototypeError.invalid("-M0Run 需要一个以字母或数字开头、最多 70 个字母数字或连字符的独立名称，不能使用保留名称 manual；没有使用默认任务库。")
         }
         return arguments[index + 1]
-    }
-
-    // A distribution launch may inspect only the legacy library with the same
-    // verified run name. An explicit automation run must never inspect manual.
-    func legacyLocalDirectory(applicationSupport: URL, arguments: [String]) throws -> URL {
-        let run = try Self.distributionRunName(arguments: arguments)
-        guard modelVersion == Self.modelVersion,
-              namespace.range(of: "^dist-[A-Za-z0-9][A-Za-z0-9-]{0,69}\\z", options: .regularExpression) != nil,
-              run == nil || namespace == "dist-\(run!)", applicationSupport.isFileURL else {
-            throw PrototypeError.invalid("无法确认旧版本任务库的对应名称；没有读取其他任务库。")
-        }
-        let name = String(namespace.dropFirst("dist-".count))
-        guard name.lowercased() != "manual" || name == "manual" else {
-            throw PrototypeError.invalid("旧版本任务库名称与手工库冲突；没有读取手工任务库。")
-        }
-        return applicationSupport.appendingPathComponent("TodoM0/Local", isDirectory: true)
-            .appendingPathComponent("local-" + name, isDirectory: true)
     }
 
     static func publish(_ session: StoreSession) throws {
@@ -186,15 +201,15 @@ struct StoreSession: Codable, Equatable, Sendable {
     static func distributionNamespace(run: String?, previous: StoreSession?) throws -> String {
         if let previous {
             guard (1...modelVersion).contains(previous.modelVersion),
-                  previous.namespace.range(of: "^dist-[a-zA-Z0-9-]{1,70}$", options: .regularExpression) != nil else {
+                  validDistributionNamespace(previous.namespace) else {
                 throw PrototypeError.unavailable("桌面任务库记录不兼容，原库与草稿已保留。")
             }
         }
-        let namespace = run.map { "dist-\($0)" } ?? previous?.namespace ?? "dist-manual"
-        guard namespace.range(of: "^dist-[a-zA-Z0-9-]{1,70}$", options: .regularExpression) != nil else {
+        guard let run else { return previous?.namespace ?? "dist-manual" }
+        guard validDistributionRunName(run) else {
             throw PrototypeError.invalid("无效的桌面测试库名称。")
         }
-        return namespace
+        return "dist-\(run)"
     }
 
     static func forMainApp(blockedSession: StoreSession?) throws -> StoreSession {
@@ -215,10 +230,10 @@ struct StoreSession: Codable, Equatable, Sendable {
         guard session.ready, session.modelVersion == modelVersion else {
             throw PrototypeError.unavailable("请先打开主应用完成存储与模型检查。")
         }
-        guard session.namespace.hasPrefix("dist-"), try readPublished(at: base) == session else {
+        guard try readPublished(at: base) == session else {
             throw PrototypeError.unavailable("桌面任务库已切换，请刷新小组件；没有访问其他任务库。")
         }
-        _ = try session.directory()
+        _ = try session.distributionDirectory(at: base)
         return session
     }
 }

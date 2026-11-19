@@ -2,7 +2,7 @@
 
 ## 分发包与 CI
 
-Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、月 Widget，支持 macOS 14 及以上的 Apple 芯片与 Intel Mac。主应用非沙盒，Widget 保留沙盒，两者分别采用 ad hoc 完整性签名。系统提醒事项的互操作与授权单独按[提醒事项方案](MAC-REMINDERS.md)验证。存储与升级约束见 [Mac 分发说明](MAC-DISTRIBUTION.md)。
+Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、月 Widget，支持 macOS 14 及以上的 Apple 芯片与 Intel Mac。主应用非沙盒，Widget 保留沙盒，两者分别采用 ad hoc 完整性签名。系统提醒事项的互操作与授权单独按[提醒事项方案](MAC-REMINDERS.md)验证。存储与容器权限约束见 [Mac 分发说明](MAC-DISTRIBUTION.md)。
 
 应用未经过 Apple 公证。首次打开可能需要在「系统设置 → 隐私与安全性」中单独允许该应用；不要求使用者提供开发者账号或关闭系统全局保护。
 
@@ -42,7 +42,7 @@ shasum -a 256 -c SHA256SUMS
 shasum -a 256 release-manifest.json
 ```
 
-记录 manifest 散列、标签和源码提交。安装并验证下载的候选，按 [Mac 分发验收规则](MAC-DISTRIBUTION.md#候选资产验收)核对打开、检索、小组件交互、主应用退出、冷启和旧 Local 数据升级。不要修改候选内的 Info、重新签名或另行打包后，把结果归到原资产。
+记录 manifest 散列、标签和源码提交。安装并验证下载的候选，按 [Mac 分发验收规则](MAC-DISTRIBUTION.md#候选资产验收)核对打开、检索、小组件交互、主应用退出与冷启。不要修改候选内的 Info、重新签名或另行打包后，把结果归到原资产。
 
 草稿仅供有仓库权限的维护者验收。公开记录应说明实际系统、硬件、验证范围和未覆盖项，不上传个人任务库、设备标识或原始私有日志。
 

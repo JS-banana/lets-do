@@ -2,7 +2,7 @@
 
 ## 范围与配置
 
-v0.2.0 的 MacDistribution 包复用现有 Mac App、Widget targets 和 Core Data 模型，包含「今天的任务」「本周计划」「月历总览」。完成按钮提交明确的完成状态；任务、日期和「快速记」链接打开主应用相应入口。v0.1.1 的公开 Local 包只含主应用，是升级来源。
+v0.2.0 的 MacDistribution 包复用现有 Mac App、Widget targets 和 Core Data 模型，包含「今天的任务」「本周计划」「月历总览」。完成按钮提交明确的完成状态；任务、日期和「快速记」链接打开主应用相应入口。
 
 公开主应用身份为 `com.panion.todo.m0.mac`，Widget 为对应的 `.widget`，URL scheme 为 `todom0`。MacDistribution 使用独立编译条件，主应用非沙盒，Widget 保留沙盒。Local 与 MacDistribution 的库路径和权限见[开发配置](DEVELOPMENT.md#配置与-scheme)。
 
@@ -14,29 +14,15 @@ ad hoc 签名没有 Team ID，Hardened Runtime 的默认库校验会拒绝加载
 
 ## 单库与共享门禁
 
-唯一可修改的任务库位于 **Widget 自身 Application Support** 下的 `TodoM0/MacDistribution/<命名空间>/`。Widget 使用系统提供的自身目录；非沙盒主应用按固定 Widget 身份定位同一目录。角色、身份字段、路径及命名空间校验集中在 [StoreSession](../Shared/StoreSession.swift)，不维护多位置副本或另一份可写快照。
+唯一可修改的任务库位于 **Widget 自身 Application Support** 下的 `TodoM0/MacDistribution/<命名空间>/`。Widget 使用系统提供的自身目录；非沙盒主应用按固定 Widget 身份定位同一目录。角色、身份字段、路径及命名空间校验集中在 [StoreSession](../Shared/StoreSession.swift)，不维护多位置副本或另一份可写快照。当前任务库目录或其直接父目录是符号链接时，拒绝开库。
 
-[TaskStore](../Shared/TaskStore.swift) 统一处理主应用、Widget 和 Intent 的 Core Data 操作。主应用负责初始化与迁移，启动时先阻断扩展，关闭旧连接，准备并打开目标库，再发布就绪会话。扩展只访问已核验的现有库，不建库、不迁移。
+显式传入 `-M0Run` 时使用 `dist-<名称>`，`manual` 的任意大小写写法均会被拒绝。无参数冷启沿用已核验的会话，没有会话记录时使用 `dist-manual`。已保存的手工库会话也只接受 `dist-manual`，遇到 `dist-MANUAL` 等大小写变体时拒绝开库。
+
+[TaskStore](../Shared/TaskStore.swift) 统一处理主应用、Widget 和 Intent 的 Core Data 操作。主应用负责建库和模型迁移，启动时先阻断扩展，关闭旧连接，打开目标库，再发布就绪会话。扩展只访问已核验的现有库，不建库、不迁移。
 
 共享会话限制命名空间和就绪状态；模型租约保护打开的模型，写锁串行化修改。旧时间线、已切换空间或启动失败不能绕过门禁写入其他库。启动时如发现旧分发命名空间的会话记录，应用会拒绝开库并保留原库与草稿。正文使用不可变版本与父关系，删除使用 tombstone；完成动作设置目标状态，重复完成不会反转状态，但不等于请求去重。
 
 macOS 的容器权限仍由系统决定。[Apple 的容器访问说明](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox)指出，macOS 14 起容器访问与代码签名关联，非沙盒应用访问其他容器也可能需要授权；[TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)解释了签名要求。同一 Bundle ID 或相同路径不能替代两次不同 ad hoc 构建的实际访问验证，不通过关闭系统保护或修改 Widget 沙盒绕过授权。
-
-## v0.1.1 Local 升级
-
-升级只在 MacDistribution 主应用的初次启动流程中执行，由 [LocalLibraryUpgrade.prepare](../Shared/LocalLibraryUpgrade.swift) 集中负责。
-
-1. **选择同名旧库。** `dist-<名称>` 只对应用户 Application Support 中的 `TodoM0/Local/local-<同名>/`。无参数的 `dist-manual` 对应手工库；显式 `-M0Run` 必须使用独立名称，拒绝缺值、重复、非法名称以及 `manual` 的任意大小写变体。无参数冷启沿用已核验的空间，不猜测其他旧库。
-2. **关闭并锁定。** 目标父目录的迁移锁串行化准备过程；源库按写锁独占、模型锁独占的顺序锁定。旧应用仍持有模型租约时阻断升级，要求先退出旧应用，不杀进程、不复制活动数据库。源为真实目录时，在创建目标父目录前和锁内分别检查解析后的路径，拒绝通过祖先链接指向源自身或其后代。
-3. **完整复制并验证。** 使用 Core Data 原生 `replacePersistentStore` 复制 SQLite，沿用历史追踪选项；复制捕获、编辑草稿及本地事件记录。私有 stage 由 TaskStore 打开、校验任务／正文／草稿并消费历史，随后关闭。保留任务 UUID、recordKey、全部正文版本、父关系、格式、tombstone 与历史记录，不用任务 JSON 导入替代完整迁移。新库的历史游标从 nil 回放，原游标仍留在备份中。
-4. **准备目标。** receipt 将事务、源与目标位置及源 store UUID 绑定；stage 带有匹配的归属记录后才安装为目标。已有目标无匹配记录、未知 symlink、损坏或未来版本记录均阻断并保留材料，不猜测归属、不覆盖其他库。源确实不存在且无升级记录时，不执行旧库迁移，由正常开库流程检查分发库。
-5. **原子提交。** 在旧 Local 父目录预建指向目标的链接，用 `renameatx_np(RENAME_SWAP)` 原子交换旧目录与链接。交换后旧路径成为新单库的 alias，完整原目录保留为同父目录中的备份；不支持交换时阻断，不退化为先删除旧目录。
-
-**源仍为原目录时，旧源仍是权威。** 中途退出后，旧应用可能继续写入，恢复必须重新复制已归属的未提交候选，不能复用过期副本。**源已是指向目标的精确 alias 时，交换已提交。** 后续恢复绝不从备份回拷，避免覆盖新库写入。
-
-旧 Local 二进制沿 alias 打开同一数据库和锁，避免留在旧位置继续产生分支；它的 `session:nil` 不会获得新增会话门禁，不能把别名兼容描述为旧版也遵守了新门禁。不要手动删除备份或把备份目录覆盖回已有新写入的目标。
-
-成功启动标记绑定实际目标目录，仅在开库、历史消费及首次读取成功后记录。同目录的进程内重启不再次迁移；已成功启动后若任务空间改变，要求退出并重新打开应用，不依赖草稿 detach 时的错误吞吐来判断运行中迁移是否安全。
 
 ## 候选资产验收
 
