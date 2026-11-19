@@ -8,18 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		E1D65B8A85A34E3EA0DC1001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E1D65B8A85A34E3EA0DC1002 /* Assets.xcassets */; };
-		C3BFE1F0D6B3A354B7108AE3 /* TodoM0iPhoneWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 1AAA223084CE66E1F2E2442F /* TodoM0iPhoneWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		EE264B23C51E36347F5781E5 /* TodoM0MacWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D4F9021888B6FD7C0AF76A0A /* TodoM0MacWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		90C67A8C80E88643960E51C0 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 98F54143AB4E86B28C3AFEE0 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 3D252D3F32A9089FC570082D;
-			remoteInfo = TodoM0iPhoneWidget;
-		};
 		B4C63918ADE919ED0C09D8AA /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 98F54143AB4E86B28C3AFEE0 /* Project object */;
@@ -48,27 +40,14 @@
 			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		893203241D5266CE800D4860 /* Embed App Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				C3BFE1F0D6B3A354B7108AE3 /* TodoM0iPhoneWidget.appex in Embed App Extensions */,
-			);
-			name = "Embed App Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		E1D65B8A85A34E3EA0DC1002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = App/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		1405DF66CBE219B0BF6355BC /* Config/Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Base.xcconfig; sourceTree = "<group>"; };
-		1AAA223084CE66E1F2E2442F /* TodoM0iPhoneWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TodoM0iPhoneWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		9E55CCE217D033018C11521C /* TodoM0Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TodoM0Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		ABD1A5D0137A7BB33C6156CA /* Let's Do.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Let's Do.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D4F9021888B6FD7C0AF76A0A /* TodoM0MacWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TodoM0MacWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		D90141C582A81DAC66FBE670 /* Let's Do.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Let's Do.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -86,21 +65,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		ACC0AD05989F9719054CB12B /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		D4D8649437FEA343395BA15B /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D5D52CF121C4A24ED071AD89 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -133,9 +98,7 @@
 			isa = PBXGroup;
 			children = (
 				ABD1A5D0137A7BB33C6156CA /* Let's Do.app */,
-				D90141C582A81DAC66FBE670 /* Let's Do.app */,
 				D4F9021888B6FD7C0AF76A0A /* TodoM0MacWidget.appex */,
-				1AAA223084CE66E1F2E2442F /* TodoM0iPhoneWidget.appex */,
 				9E55CCE217D033018C11521C /* TodoM0Tests.xctest */,
 			);
 			name = Products;
@@ -209,50 +172,6 @@
 			productReference = D4F9021888B6FD7C0AF76A0A /* TodoM0MacWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		3D252D3F32A9089FC570082D /* TodoM0iPhoneWidget */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 6D3D30D4905A24043BD8B558 /* Build configuration list for PBXNativeTarget "TodoM0iPhoneWidget" */;
-			buildPhases = (
-				9F6153D515F877AAD9F876A5 /* Sources */,
-				D5D52CF121C4A24ED071AD89 /* Frameworks */,
-				E5DEB5BCF27264F9AA2E1358 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				5CD1A383A7404637B55B9754 /* Shared */,
-				A86DA6A2B8A4EE27F7C094E2 /* Widgets */,
-			);
-			name = TodoM0iPhoneWidget;
-			productName = TodoM0iPhoneWidget;
-			productReference = 1AAA223084CE66E1F2E2442F /* TodoM0iPhoneWidget.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
-		63DDA077F83B60205E1A0D7E /* TodoM0iPhone */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 8E81149E9AE0840905B83F89 /* Build configuration list for PBXNativeTarget "TodoM0iPhone" */;
-			buildPhases = (
-				C9802D17E3C74F0DADFCFECE /* Sources */,
-				ACC0AD05989F9719054CB12B /* Frameworks */,
-				35E1612331A9F6EDE36C7655 /* Resources */,
-				893203241D5266CE800D4860 /* Embed App Extensions */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				BBBDB11F10ECF4E2365A8F6B /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				49FD95CD032EF842D70FF423 /* App */,
-				5CD1A383A7404637B55B9754 /* Shared */,
-			);
-			name = TodoM0iPhone;
-			productName = "Let's Do";
-			productReference = D90141C582A81DAC66FBE670 /* Let's Do.app */;
-			productType = "com.apple.product-type.application";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -277,22 +196,13 @@
 			projectRoot = "";
 			targets = (
 				27D0266E73126522FCB212A2 /* TodoM0Mac */,
-				63DDA077F83B60205E1A0D7E /* TodoM0iPhone */,
 				28744B111726868E101783F8 /* TodoM0MacWidget */,
-				3D252D3F32A9089FC570082D /* TodoM0iPhoneWidget */,
 				1400171C04811E375327B581 /* TodoM0Tests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		35E1612331A9F6EDE36C7655 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		7544D1CD88A97CE386FD1767 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -315,13 +225,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		E5DEB5BCF27264F9AA2E1358 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -333,20 +236,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		56FAE39FA1CC8573ED58CE35 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		9F6153D515F877AAD9F876A5 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		C9802D17E3C74F0DADFCFECE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -373,11 +262,6 @@
 			target = 27D0266E73126522FCB212A2 /* TodoM0Mac */;
 			targetProxy = B4C63918ADE919ED0C09D8AA /* PBXContainerItemProxy */;
 		};
-		BBBDB11F10ECF4E2365A8F6B /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 3D252D3F32A9089FC570082D /* TodoM0iPhoneWidget */;
-			targetProxy = 90C67A8C80E88643960E51C0 /* PBXContainerItemProxy */;
-		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -388,36 +272,12 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
 				CODE_SIGN_IDENTITY = "-";
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_TESTABILITY = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG M0_LOCAL";
 			};
 			name = Local;
-		};
-		16D560D671A791ED8D98CBE8 /* CloudDevelopment */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Config/iPhone-Cloud.entitlements";
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				ENABLE_HARDENED_RUNTIME = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				INFOPLIST_FILE = "Config/App-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "$(M0_BUNDLE_PREFIX).ios";
-				PRODUCT_MODULE_NAME = TodoM0;
-				PRODUCT_NAME = "Let's Do";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = CloudDevelopment;
 		};
 		372CACFBB867D71AF280485F /* CloudDevelopment */ = {
 			isa = XCBuildConfiguration;
@@ -551,30 +411,6 @@
 			};
 			name = Local;
 		};
-		C2FB3367DB81AC66DF90B00A /* Local */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = "";
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				ENABLE_HARDENED_RUNTIME = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Config/Widget-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "$(M0_BUNDLE_PREFIX).ios.widget";
-				PRODUCT_MODULE_NAME = TodoM0Widgets;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Local;
-		};
 		CF85251F4F9FEC353FC02C51 /* CloudDevelopment */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1405DF66CBE219B0BF6355BC /* Config/Base.xcconfig */;
@@ -589,53 +425,6 @@
 			};
 			name = CloudDevelopment;
 		};
-		DF234C0ABCEA4256A0C688E0 /* CloudDevelopment */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = "Config/iPhone-Cloud.entitlements";
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				ENABLE_HARDENED_RUNTIME = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Config/Widget-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "$(M0_BUNDLE_PREFIX).ios.widget";
-				PRODUCT_MODULE_NAME = TodoM0Widgets;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = CloudDevelopment;
-		};
-		F0C18BB5556717FA1626209C /* Local */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "";
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				ENABLE_HARDENED_RUNTIME = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				INFOPLIST_FILE = "Config/App-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "$(M0_BUNDLE_PREFIX).ios";
-				PRODUCT_MODULE_NAME = TodoM0;
-				PRODUCT_NAME = "Let's Do";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Local;
-		};
 		07B222AB42282BACAAACCC43 /* DesktopLocal */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 1405DF66CBE219B0BF6355BC /* Config/Base.xcconfig */;
@@ -647,7 +436,6 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_TESTABILITY = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
@@ -718,55 +506,6 @@
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = macosx;
-			};
-			name = DesktopLocal;
-		};
-		62CDC55BE6ACFBAA31F1AFBF /* DesktopLocal */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) M0_LOCAL";
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = "";
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				ENABLE_HARDENED_RUNTIME = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Config/Widget-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "$(M0_BUNDLE_PREFIX).ios.widget";
-				PRODUCT_MODULE_NAME = TodoM0Widgets;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = DesktopLocal;
-		};
-		196692AB1480C501A63EF330 /* DesktopLocal */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) M0_LOCAL";
-				CODE_SIGN_ENTITLEMENTS = "";
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				ENABLE_HARDENED_RUNTIME = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				INFOPLIST_FILE = "Config/App-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "$(M0_BUNDLE_PREFIX).ios";
-				PRODUCT_MODULE_NAME = TodoM0;
-				PRODUCT_NAME = "Let's Do";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = DesktopLocal;
 		};
@@ -883,26 +622,6 @@
 				E7719144931FC38A8A84CE72 /* DesktopLocal */,
 				D15700000000000000000002 /* MacDistribution */,
 				372CACFBB867D71AF280485F /* CloudDevelopment */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Local;
-		};
-		6D3D30D4905A24043BD8B558 /* Build configuration list for PBXNativeTarget "TodoM0iPhoneWidget" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				C2FB3367DB81AC66DF90B00A /* Local */,
-				62CDC55BE6ACFBAA31F1AFBF /* DesktopLocal */,
-				DF234C0ABCEA4256A0C688E0 /* CloudDevelopment */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Local;
-		};
-		8E81149E9AE0840905B83F89 /* Build configuration list for PBXNativeTarget "TodoM0iPhone" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				F0C18BB5556717FA1626209C /* Local */,
-				196692AB1480C501A63EF330 /* DesktopLocal */,
-				16D560D671A791ED8D98CBE8 /* CloudDevelopment */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Local;

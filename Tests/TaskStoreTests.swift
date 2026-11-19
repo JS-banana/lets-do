@@ -1197,7 +1197,6 @@ final class TaskStoreTests: XCTestCase {
         }
     }
 
-    #if os(macOS)
     @MainActor
     func testLocalUpgradePreservesPhysicalRecordsRevisionsDraftsHistoryAndIsIdempotent() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Upgrade-\(UUID().uuidString)")
@@ -1384,7 +1383,6 @@ final class TaskStoreTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: source.path, withDestinationPath: target.path)
         XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
     }
-    #endif
 
     @MainActor
     func testLocalCapturePerformanceBaseline() throws {

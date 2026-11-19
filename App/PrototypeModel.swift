@@ -2,9 +2,7 @@ import CloudKit
 import Combine
 import Foundation
 import WidgetKit
-#if os(macOS)
 import EventKit
-#endif
 
 @MainActor
 final class PrototypeModel: ObservableObject {
@@ -32,7 +30,6 @@ final class PrototypeModel: ObservableObject {
     }
     @Published var completionFeedback: CompletionFeedback?
     let capture = CaptureDraft()
-    #if os(macOS)
     let reminders = MacReminders()
     private var reminderChanges: AnyCancellable?
 
@@ -43,7 +40,6 @@ final class PrototypeModel: ObservableObject {
                 Task { @MainActor in await self?.reminders.refreshIfConnected() }
             }
     }
-    #endif
     private(set) var store: TaskStore?
     private var accountObserver: NSObjectProtocol?
     private var starting = false
@@ -118,9 +114,7 @@ final class PrototypeModel: ObservableObject {
         accountCheckID = UUID()
         checkingAccount = true
         capture.detach()
-        #if os(macOS)
         reminders.attach(nil)
-        #endif
         defer {
             starting = false
             checkingAccount = false
@@ -169,7 +163,6 @@ final class PrototypeModel: ObservableObject {
             }
             guard !restartRequested else { return }
             let directory = try session.directory()
-            #if os(macOS)
             if StoreSession.isMacDistributionBuild {
                 if let startedDistributionDirectory {
                     guard startedDistributionDirectory == directory else {
@@ -185,7 +178,6 @@ final class PrototypeModel: ObservableObject {
                     try LocalLibraryUpgrade.prepare(source: source, target: directory)
                 }
             }
-            #endif
             let opened = try TaskStore(directory: directory, cloudID: session.cloudEnabled ? StoreSession.cloudID : nil,
                                        session: StoreSession.isLocalBuild ? nil : session)
             opened.onChange = { [weak self] in self?.reload() }
@@ -218,10 +210,8 @@ final class PrototypeModel: ObservableObject {
             }
             loaded = true
             capture.attach(to: opened, tasks: tasks, skipping: unreadableIDs)
-            #if os(macOS)
             reminders.attach(opened)
             Task { await reminders.refreshIfConnected() }
-            #endif
             if StoreSession.isMacDistributionBuild { startedDistributionDirectory = directory }
         } catch {
             try? store?.close()

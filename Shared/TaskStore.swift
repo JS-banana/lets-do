@@ -505,10 +505,6 @@ final class TaskStore {
         description.shouldInferMappingModelAutomatically = !isExtension
         description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
         description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
-        #if os(iOS)
-        description.setOption(FileProtectionType.completeUntilFirstUserAuthentication as NSObject,
-                              forKey: NSPersistentStoreFileProtectionKey)
-        #endif
         if let cloudID {
             let options = NSPersistentCloudKitContainerOptions(containerIdentifier: cloudID)
             options.databaseScope = .private

@@ -1,8 +1,6 @@
 import XCTest
-#if os(macOS)
 import SwiftUI
 import WidgetKit
-#endif
 @testable import TodoM0
 
 final class WeekTaskOverviewTests: XCTestCase {
@@ -241,7 +239,6 @@ final class WeekTaskOverviewTests: XCTestCase {
         XCTAssertEqual(utc.rows.map(\.day), [sunday, sunday])
     }
 
-    #if os(macOS)
     @MainActor
     func testMediumWeekFitsMacPreviewWithOverflowAndFooterLinks() throws {
         let monday = try day("2026-11-09")
@@ -290,7 +287,6 @@ final class WeekTaskOverviewTests: XCTestCase {
             add(attachment)
         }
     }
-    #endif
 
     func testIncompleteWeekBoundariesReturnNil() throws {
         XCTAssertNil(WeekTaskOverview.make(today: try day("0001-01-01"), tasks: [], timeZone: gmt))

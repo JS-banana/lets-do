@@ -1,4 +1,4 @@
-#if os(macOS) && M0_DISTRIBUTION
+#if M0_DISTRIBUTION
 import AppKit
 import SwiftUI
 

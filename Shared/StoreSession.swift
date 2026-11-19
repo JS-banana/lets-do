@@ -74,7 +74,7 @@ struct StoreSession: Codable, Equatable, Sendable {
 
     static var isDesktopLocalBuild: Bool {
         // Both desktop configurations use published local sessions; only DesktopLocal uses an App Group.
-        #if os(macOS) && (M0_DESKTOP || M0_DISTRIBUTION)
+        #if M0_DESKTOP || M0_DISTRIBUTION
         true
         #else
         false
@@ -82,7 +82,7 @@ struct StoreSession: Codable, Equatable, Sendable {
     }
 
     static var isMacDistributionBuild: Bool {
-        #if os(macOS) && M0_DISTRIBUTION
+        #if M0_DISTRIBUTION
         true
         #else
         false
@@ -92,7 +92,6 @@ struct StoreSession: Codable, Equatable, Sendable {
     static var supportsCloudSync: Bool { !isLocalBuild && !isDesktopLocalBuild }
 
     static func baseURL() throws -> URL {
-        #if os(macOS)
         if isMacDistributionBuild {
             let fm = FileManager.default
             return try distributionBaseURL(
@@ -104,7 +103,6 @@ struct StoreSession: Codable, Equatable, Sendable {
                 userHome: fm.homeDirectoryForCurrentUser
             )
         }
-        #endif
         if isLocalBuild {
             let base = try FileManager.default.url(for: .applicationSupportDirectory,
                                                   in: .userDomainMask, appropriateFor: nil, create: true)

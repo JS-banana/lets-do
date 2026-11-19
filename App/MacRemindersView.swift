@@ -1,4 +1,3 @@
-#if os(macOS)
 import SwiftUI
 
 /// Import stays a quiet icon until the connected list has reminders to bring in.
@@ -199,4 +198,3 @@ struct MacReminderHandoffView: View {
         .task { await reminders.refresh() }
     }
 }
-#endif

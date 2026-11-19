@@ -1,4 +1,3 @@
-#if os(macOS)
 import Carbon.HIToolbox
 import SwiftUI
 
@@ -99,4 +98,3 @@ final class GlobalCaptureHotKey: ObservableObject {
         failure = status == noErr ? nil : "\(Self.shortcut) 已被其他应用占用，暂时无法使用。"
     }
 }
-#endif

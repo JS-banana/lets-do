@@ -184,7 +184,7 @@ try:
     require(output.suffix.lower() == ".dmg", "--output must name a .dmg file.")
     require(not any(path.exists() or path.is_symlink() for path in (output, archive, manifest_path, sums_path)),
             "An output asset already exists; choose a new directory.")
-    require(re.search(r"#if\s+os\(macOS\)\s*&&\s*M0_DISTRIBUTION\b",
+    require(re.search(r"(?m)^\s*#if M0_DISTRIBUTION\s*$",
                       (ROOT / "Shared" / "StoreSession.swift").read_text()),
             "The distribution storage macro changed; review packaging compilation conditions first.")
     run("xcode", ["xcodebuild", "-version"])
