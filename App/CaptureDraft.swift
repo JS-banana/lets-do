@@ -125,7 +125,7 @@ final class CaptureDraft: ObservableObject {
         }
     }
 
-    func save(using model: PrototypeModel) -> Bool {
+    func save(using model: AppModel) -> Bool {
         TaskWritingEditor.finishEditing()
         let savedID = id
         guard model.create(title: content.title, id: savedID, schedule: plan.schedule,

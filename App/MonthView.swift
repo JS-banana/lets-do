@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MonthView: View {
-    @ObservedObject var model: PrototypeModel
+    @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @Binding var selectedDay: Day
     let create: (Day) -> Void

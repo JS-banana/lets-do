@@ -909,7 +909,7 @@ final class TaskStoreTests: XCTestCase {
         defer { withExtendedLifetime(lease) {} }
         XCTAssertThrowsError(try TaskStore(directory: directory, isExtension: true))
         XCTAssertThrowsError(try TaskStore(directory: directory)) { error in
-            guard case PrototypeError.busy = error else { return XCTFail("Expected model lease contention, got \(error)") }
+            guard case AppError.busy = error else { return XCTFail("Expected model lease contention, got \(error)") }
         }
         XCTAssertEqual(try Data(contentsOf: url), original)
     }

@@ -12,7 +12,7 @@ struct NoteRevision: Codable, Equatable, Identifiable, Sendable {
     var formatting: NoteFormatting? = nil
 
     static func validateGraph(_ revisions: [NoteRevision]) throws {
-        guard cyclic(revisions).isEmpty else { throw PrototypeError.invalid("正文父版本存在循环，未覆盖原记录。") }
+        guard cyclic(revisions).isEmpty else { throw AppError.invalid("正文父版本存在循环，未覆盖原记录。") }
     }
 
     /// Revisions on a parent cycle or descending from one; empty for a valid history.
@@ -108,7 +108,7 @@ struct TaskArchive: Codable, Sendable {
 
     private static func checkSize(_ data: Data) throws {
         guard data.count <= 20_000_000 else {
-            throw PrototypeError.invalid("JSON 备份超过 20 MB，无法导出或恢复。原库已保留。")
+            throw AppError.invalid("JSON 备份超过 20 MB，无法导出或恢复。原库已保留。")
         }
     }
 
@@ -118,10 +118,10 @@ struct TaskArchive: Codable, Sendable {
         decoder.dateDecodingStrategy = .millisecondsSince1970
         let archive = try decoder.decode(Self.self, from: data)
         guard archive.formatVersion == 1, (1...StoreSession.modelVersion).contains(archive.modelVersion) else {
-            throw PrototypeError.invalid("备份版本不受支持；原库未改动。")
+            throw AppError.invalid("备份版本不受支持；原库未改动。")
         }
         guard Set(archive.tasks.map(\.id)).count == archive.tasks.count else {
-            throw PrototypeError.invalid("备份存在重复任务 UUID；未导入。")
+            throw AppError.invalid("备份存在重复任务 UUID；未导入。")
         }
         var revisionIDs = Set<UUID>()
         for task in archive.tasks {
@@ -130,7 +130,7 @@ struct TaskArchive: Codable, Sendable {
             for revision in task.revisions {
                 guard revision.taskID == task.id, revision.body.utf8.count <= 1_000_000,
                       !revision.parentIDs.contains(revision.id), revisionIDs.insert(revision.id).inserted else {
-                    throw PrototypeError.invalid("正文版本内容或身份无效；未导入。")
+                    throw AppError.invalid("正文版本内容或身份无效；未导入。")
                 }
                 _ = try revision.formatting?.validated(for: revision.body)
             }
@@ -157,7 +157,7 @@ final class TaskStore {
 
     private var context: NSManagedObjectContext {
         get throws {
-            guard let container else { throw PrototypeError.unavailable("存储已关闭，请重新打开应用。") }
+            guard let container else { throw AppError.unavailable("存储已关闭，请重新打开应用。") }
             return container.viewContext
         }
     }
@@ -170,7 +170,7 @@ final class TaskStore {
     nonisolated static func validTitle(_ title: String) throws -> String {
         let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.utf8.count <= 8_192 else {
-            throw PrototypeError.invalid("请输入标题（最多 8 KB）。")
+            throw AppError.invalid("请输入标题（最多 8 KB）。")
         }
         return value
     }
@@ -186,12 +186,12 @@ final class TaskStore {
         self.session = session
         guard let modelURL = Bundle.main.url(forResource: "Model", withExtension: "momd"),
               let model = NSManagedObjectModel(contentsOf: modelURL) else {
-            throw PrototypeError.unavailable("未找到版本化数据模型。")
+            throw AppError.unavailable("未找到版本化数据模型。")
         }
         let storeURL = directory.appendingPathComponent("tasks.sqlite")
         if isExtension {
             guard FileManager.default.fileExists(atPath: storeURL.path) else {
-                throw PrototypeError.unavailable("请先打开主应用建库。Widget 未创建空库。")
+                throw AppError.unavailable("请先打开主应用建库。Widget 未创建空库。")
             }
         } else {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
@@ -209,7 +209,7 @@ final class TaskStore {
         } else { compatible = false }
         if !compatible {
             guard !isExtension else {
-                throw PrototypeError.unavailable("模型不兼容，请打开主应用升级。Widget 未迁移。")
+                throw AppError.unavailable("模型不兼容，请打开主应用升级。Widget 未迁移。")
             }
             // No open app/extension may retain the old model while migration runs.
             try lease.changeMode(LOCK_EX)
@@ -284,7 +284,7 @@ final class TaskStore {
         let published = try StoreSession.readPublished(at: base)
         guard session.ready, session.modelVersion == StoreSession.modelVersion,
               directory.lastPathComponent == session.namespace, published == session else {
-            throw PrototypeError.unavailable("存储会话或模型已变化；没有访问旧库，请重新打开应用。")
+            throw AppError.unavailable("存储会话或模型已变化；没有访问旧库，请重新打开应用。")
         }
         return lock
     }
@@ -320,7 +320,7 @@ final class TaskStore {
                     body: String = "", formatting: NoteFormatting? = nil) throws -> UUID {
         let title = try Self.validTitle(title)
         let scheduleData = try JSONEncoder().encode(schedule.validated())
-        guard body.utf8.count <= 1_000_000 else { throw PrototypeError.invalid("正文超过 1 MB，当前输入已保留。") }
+        guard body.utf8.count <= 1_000_000 else { throw AppError.invalid("正文超过 1 MB，当前输入已保留。") }
         let formatting = try formatting?.validated(for: body)
         return try write("task.create", id: id) { context in
             if try !matching(id).isEmpty { return id }
@@ -346,7 +346,7 @@ final class TaskStore {
 
     func scheduleTask(id: UUID, schedule: TaskSchedule) throws {
         let data = try JSONEncoder().encode(schedule.validated())
-        guard let value = String(data: data, encoding: .utf8) else { throw PrototypeError.invalid("日期编码失败。") }
+        guard let value = String(data: data, encoding: .utf8) else { throw AppError.invalid("日期编码失败。") }
         try mutate("task.schedule", id: id) { $0.setValue(value, forKey: "scheduleJSON") }
     }
 
@@ -374,7 +374,7 @@ final class TaskStore {
     // atomically with the task and retained even after consumeHistory advances its cursor.
     private func hasCommittedAction(_ actionID: UUID, in context: NSManagedObjectContext) throws -> Bool {
         guard let entity = NSPersistentHistoryTransaction.entityDescription(with: context) else {
-            throw PrototypeError.unavailable("无法核对已提交的完成操作；任务保持原状。")
+            throw AppError.unavailable("无法核对已提交的完成操作；任务保持原状。")
         }
         let transactions = NSFetchRequest<NSFetchRequestResult>()
         transactions.entity = entity
@@ -386,7 +386,7 @@ final class TaskStore {
         guard let result = try context.execute(request) as? NSPersistentHistoryResult,
               result.resultType == .transactionsOnly,
               let history = result.result as? [NSPersistentHistoryTransaction] else {
-            throw PrototypeError.unavailable("无法核对已提交的完成操作；任务保持原状。")
+            throw AppError.unavailable("无法核对已提交的完成操作；任务保持原状。")
         }
         return !history.isEmpty
     }
@@ -397,8 +397,8 @@ final class TaskStore {
         try write(action, id: id, actionID: actionID) { context in
             if skipCommittedAction, try hasCommittedAction(actionID, in: context) { return }
             let items = try matching(id)
-            guard !items.isEmpty else { throw PrototypeError.missingTask }
-            guard allowTrashed || items.allSatisfy({ $0.value(forKey: "deletedAt") == nil }) else { throw PrototypeError.trashed }
+            guard !items.isEmpty else { throw AppError.missingTask }
+            guard allowTrashed || items.allSatisfy({ $0.value(forKey: "deletedAt") == nil }) else { throw AppError.trashed }
             for item in items {
                 try body(item)
                 item.setValue(Date(), forKey: "updatedAt")
@@ -409,12 +409,12 @@ final class TaskStore {
     func saveNoteRevision(taskID: UUID, id: UUID, body: String, parentIDs: [UUID],
                           formatting: NoteFormatting? = nil) throws {
         guard body.utf8.count <= 1_000_000, !parentIDs.contains(id) else {
-            throw PrototypeError.invalid("正文超过 1 MB 或父版本无效。")
+            throw AppError.invalid("正文超过 1 MB 或父版本无效。")
         }
         try write("note.append", id: id) { context in
             let tasks = try matching(taskID)
-            guard !tasks.isEmpty else { throw PrototypeError.missingTask }
-            guard tasks.allSatisfy({ $0.value(forKey: "deletedAt") == nil }) else { throw PrototypeError.trashed }
+            guard !tasks.isEmpty else { throw AppError.missingTask }
+            guard tasks.allSatisfy({ $0.value(forKey: "deletedAt") == nil }) else { throw AppError.trashed }
             try appendNote(in: context, tasks: tasks, taskID: taskID, id: id,
                            body: body, formatting: formatting, parents: parentIDs)
         }
@@ -423,12 +423,12 @@ final class TaskStore {
     func updateContent(id: UUID, title: String?, revisionID: UUID, body: String,
                        formatting: NoteFormatting?, parentIDs: [UUID]) throws {
         let title = try title.map(Self.validTitle)
-        guard body.utf8.count <= 1_000_000 else { throw PrototypeError.invalid("正文超过 1 MB，当前输入已保留。") }
+        guard body.utf8.count <= 1_000_000 else { throw AppError.invalid("正文超过 1 MB，当前输入已保留。") }
         let formatting = try formatting?.validated(for: body)
         try write("task.edit", id: id) { context in
             let tasks = try matching(id)
-            guard !tasks.isEmpty else { throw PrototypeError.missingTask }
-            guard tasks.allSatisfy({ $0.value(forKey: "deletedAt") == nil }) else { throw PrototypeError.trashed }
+            guard !tasks.isEmpty else { throw AppError.missingTask }
+            guard tasks.allSatisfy({ $0.value(forKey: "deletedAt") == nil }) else { throw AppError.trashed }
             let request = NSFetchRequest<NSManagedObject>(entityName: "TaskNoteRevision")
             request.predicate = NSPredicate(format: "taskID == %@", id as NSUUID)
             let notes = try context.fetch(request).map { try readRevision($0) }
@@ -454,7 +454,7 @@ final class TaskStore {
     private func appendNote(in context: NSManagedObjectContext, tasks: [NSManagedObject], taskID: UUID,
                             id: UUID, body: String, formatting: NoteFormatting?, parents: [UUID]) throws {
         guard body.utf8.count <= 1_000_000, !parents.contains(id) else {
-            throw PrototypeError.invalid("正文超过 1 MB 或父版本无效。")
+            throw AppError.invalid("正文超过 1 MB 或父版本无效。")
         }
         let formattingJSON = try formatting?.encoded(for: body)
         let formatting = try NoteFormatting.decode(formattingJSON, body: body)
@@ -464,7 +464,7 @@ final class TaskStore {
         let existing = try context.fetch(request).map { try readRevision($0) }
         if !existing.isEmpty {
             guard existing.allSatisfy({ $0.taskID == taskID && $0.body == body && $0.formatting == formatting && Set($0.parentIDs) == Set(parents) }) else {
-                throw PrototypeError.invalid("相同正文版本 UUID 的内容不同，未覆盖。")
+                throw AppError.invalid("相同正文版本 UUID 的内容不同，未覆盖。")
             }
             return
         }
@@ -472,7 +472,7 @@ final class TaskStore {
         var previous: [UUID: NoteRevision] = [:]
         for value in try context.fetch(request).map({ try readRevision($0) }) {
             if let old = previous[value.id], old.body != value.body || old.formatting != value.formatting || Set(old.parentIDs) != Set(value.parentIDs) {
-                throw PrototypeError.invalid("正文身份冲突；原记录保留。")
+                throw AppError.invalid("正文身份冲突；原记录保留。")
             }
             previous[value.id] = value
         }
@@ -497,9 +497,9 @@ final class TaskStore {
               let body = note.value(forKey: "body") as? String,
               let createdAt = note.value(forKey: "createdAt") as? Date,
               let parents = note.value(forKey: "parentIDsJSON") as? String else {
-            throw PrototypeError.unavailable("正文记录字段不完整，原记录已保留。")
+            throw AppError.unavailable("正文记录字段不完整，原记录已保留。")
         }
-        guard body.utf8.count <= 1_000_000 else { throw PrototypeError.invalid("正文异常过大，原记录保留。") }
+        guard body.utf8.count <= 1_000_000 else { throw AppError.invalid("正文异常过大，原记录保留。") }
         return NoteRevision(id: id, taskID: taskID, body: body,
                             parentIDs: try JSONDecoder().decode([UUID].self, from: Data(parents.utf8)), createdAt: createdAt,
                             formatting: try NoteFormatting.decode(note.value(forKey: "formattingJSON") as? String, body: body))
@@ -552,7 +552,7 @@ final class TaskStore {
             if let previous = revisions[id] {
                 guard previous.body == value.body, previous.formatting == value.formatting,
                       previous.taskID == value.taskID, Set(previous.parentIDs) == Set(value.parentIDs) else {
-                    try skip(PrototypeError.invalid("正文身份冲突；原记录保留，请检查诊断。"), task: value.taskID)
+                    try skip(AppError.invalid("正文身份冲突；原记录保留，请检查诊断。"), task: value.taskID)
                     broken.insert(previous.taskID)
                     continue
                 }
@@ -573,7 +573,7 @@ final class TaskStore {
         var groups: [UUID: [NSManagedObject]] = [:]
         for object in objects {
             guard let id = object.value(forKey: "id") as? UUID else {
-                try skip(PrototypeError.unavailable("任务缺少标识，原记录已保留。"), task: nil)
+                try skip(AppError.unavailable("任务缺少标识，原记录已保留。"), task: nil)
                 continue
             }
             groups[id, default: []].append(object)
@@ -588,7 +588,7 @@ final class TaskStore {
                   let createdAt = object.value(forKey: "createdAt") as? Date,
                   let updatedAt = object.value(forKey: "updatedAt") as? Date,
                   let scheduleJSON = object.value(forKey: "scheduleJSON") as? String else {
-                try skip(PrototypeError.unavailable("任务字段不完整，原记录已保留。"), task: id)
+                try skip(AppError.unavailable("任务字段不完整，原记录已保留。"), task: id)
                 continue
             }
             let schedule: TaskSchedule
@@ -615,7 +615,7 @@ final class TaskStore {
         let ids = Set(tasks.map(\.id))
         let notes = try context.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskNoteRevision"))
         guard notes.allSatisfy({ ($0.value(forKey: "taskID") as? UUID).map { ids.contains($0) } == true }) else {
-            throw PrototypeError.unavailable("部分正文缺少对应任务，无法导出完整备份。原记录已保留。")
+            throw AppError.unavailable("部分正文缺少对应任务，无法导出完整备份。原记录已保留。")
         }
         return TaskArchive(formatVersion: 1, modelVersion: StoreSession.modelVersion,
                            exportedAt: Date(), tasks: tasks)
@@ -626,7 +626,7 @@ final class TaskStore {
         defer { withExtendedLifetime(access) {} }
         guard !isExtension, draft.formatVersion == 1, draft.title.utf8.count <= 8_192,
               draft.body.utf8.count <= 1_000_000, !draft.parentIDs.contains(draft.id) else {
-            throw PrototypeError.invalid("草稿格式或长度无效；当前输入仍在编辑器中。")
+            throw AppError.invalid("草稿格式或长度无效；当前输入仍在编辑器中。")
         }
         _ = try draft.formatting?.validated(for: draft.body)
         let folder = directory.appendingPathComponent("drafts", isDirectory: true)
@@ -646,10 +646,10 @@ final class TaskStore {
         return try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }.map { url in
                 let data = try Data(contentsOf: url)
-                guard data.count <= 2_000_000 else { throw PrototypeError.invalid("草稿异常过大；原文件保留。") }
+                guard data.count <= 2_000_000 else { throw AppError.invalid("草稿异常过大；原文件保留。") }
                 let draft = try JSONDecoder().decode(LocalDraft.self, from: data)
                 guard draft.formatVersion == 1, url.deletingPathExtension().lastPathComponent == draft.id.uuidString else {
-                    throw PrototypeError.invalid("草稿版本或身份不匹配；原文件保留。")
+                    throw AppError.invalid("草稿版本或身份不匹配；原文件保留。")
                 }
                 _ = try draft.formatting?.validated(for: draft.body)
                 return draft
@@ -664,12 +664,12 @@ final class TaskStore {
     }
 
     func restoreIntoEmptyLocalStore(_ archive: TaskArchive) throws {
-        guard !isExtension else { throw PrototypeError.invalid("备份只能恢复到空的本机任务库；原有任务未改动。") }
+        guard !isExtension else { throw AppError.invalid("备份只能恢复到空的本机任务库；原有任务未改动。") }
         let verified = try TaskArchive.decode(archive.encoded())
         try write("archive.restore", id: UUID()) { context in
             let request = NSFetchRequest<NSManagedObject>(entityName: "TaskItem")
             guard try context.count(for: request) == 0 else {
-                throw PrototypeError.invalid("当前任务库已有任务，备份没有导入。恢复只支持空的本机任务库，原有任务未改动。")
+                throw AppError.invalid("当前任务库已有任务，备份没有导入。恢复只支持空的本机任务库，原有任务未改动。")
             }
             for task in verified.tasks {
                 let item = NSEntityDescription.insertNewObject(forEntityName: "TaskItem", into: context)
@@ -727,9 +727,9 @@ final class TaskStore {
         do {
             let url = directory.appendingPathComponent("events.jsonl")
             let descriptor = open(url.path, O_CREAT | O_APPEND | O_WRONLY, 0o600)
-            guard descriptor >= 0 else { throw PrototypeError.unavailable("无法记录证据。") }
+            guard descriptor >= 0 else { throw AppError.unavailable("无法记录证据。") }
             defer { Darwin.close(descriptor) }
-            guard flock(descriptor, LOCK_EX) == 0 else { throw PrototypeError.busy }
+            guard flock(descriptor, LOCK_EX) == 0 else { throw AppError.busy }
             defer { flock(descriptor, LOCK_UN) }
             var data = try JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys])
             data.append(0x0A)

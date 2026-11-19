@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct WeekView: View {
-    @ObservedObject var model: PrototypeModel
+    @ObservedObject var model: AppModel
     @Binding var selectedDay: Day
     let create: (Day) -> Void
     let inspectDay: (Day) -> Void

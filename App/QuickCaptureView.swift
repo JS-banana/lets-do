@@ -2,12 +2,12 @@ import Carbon.HIToolbox
 import SwiftUI
 
 struct QuickCaptureView: View {
-    @ObservedObject var model: PrototypeModel
+    @ObservedObject var model: AppModel
     @ObservedObject private var draft: CaptureDraft
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
 
-    init(model: PrototypeModel) {
+    init(model: AppModel) {
         self.model = model
         draft = model.capture
     }
@@ -36,7 +36,7 @@ struct QuickCaptureView: View {
     }
 }
 
-extension PrototypeModel {
+extension AppModel {
     /// The menu and the global shortcut open capture like the widget's quick capture: unscheduled.
     func openQuickCapture(_ openWindow: OpenWindowAction) {
         capture.mainWindowID = nil

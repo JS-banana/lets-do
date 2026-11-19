@@ -10,8 +10,8 @@ struct ArchiveDocument: FileDocument {
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
 
-struct PrototypeView: View {
-    @ObservedObject var model: PrototypeModel
+struct MainView: View {
+    @ObservedObject var model: AppModel
     @ObservedObject private var captureSession: CaptureDraft
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismissWindow) private var dismissWindow
@@ -36,7 +36,7 @@ struct PrototypeView: View {
     @State private var exporting = false
     @State private var importing = false
 
-    init(model: PrototypeModel) {
+    init(model: AppModel) {
         self.model = model
         captureSession = model.capture
     }
@@ -996,7 +996,7 @@ struct CaptureSheet: View {
 }
 
 struct TaskDetail: View {
-    @ObservedObject var model: PrototypeModel
+    @ObservedObject var model: AppModel
     let task: TaskSnapshot
     var inDrawer = false
     private let editingStore: TaskStore?
@@ -1015,7 +1015,7 @@ struct TaskDetail: View {
     @State private var draftStatus = ""
     @State private var otherDrafts: [LocalDraft] = []
 
-    init(model: PrototypeModel, task: TaskSnapshot, inDrawer: Bool = false) {
+    init(model: AppModel, task: TaskSnapshot, inDrawer: Bool = false) {
         self.model = model
         self.task = task
         self.inDrawer = inDrawer

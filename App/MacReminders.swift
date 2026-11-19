@@ -93,7 +93,7 @@ private final class SystemReminderSource: MacReminderSource {
     private func writableCalendar(_ scope: MacReminderScope) throws -> EKCalendar {
         guard authorized, let list = events.calendar(withIdentifier: scope.listID),
               list.allowsContentModifications, Self.scope(list) == scope else {
-            throw PrototypeError.unavailable("提醒事项清单不可用，请重新选择。")
+            throw AppError.unavailable("提醒事项清单不可用，请重新选择。")
         }
         return list
     }
@@ -112,7 +112,7 @@ private final class SystemReminderSource: MacReminderSource {
             reminder.dueDateComponents = components
         }
         try events.save(reminder, commit: true)
-        guard let saved = Self.candidate(reminder) else { throw PrototypeError.unavailable("发送状态待核对。") }
+        guard let saved = Self.candidate(reminder) else { throw AppError.unavailable("发送状态待核对。") }
         return saved
     }
 
@@ -123,7 +123,7 @@ private final class SystemReminderSource: MacReminderSource {
         return try await withCheckedThrowingContinuation { continuation in
             events.fetchReminders(matching: predicate) { @Sendable reminders in
                 guard let reminders else {
-                    continuation.resume(throwing: PrototypeError.unavailable("读取提醒事项失败，请稍后刷新。"))
+                    continuation.resume(throwing: AppError.unavailable("读取提醒事项失败，请稍后刷新。"))
                     return
                 }
                 continuation.resume(returning: reminders.compactMap(Self.candidate))
@@ -168,7 +168,7 @@ private struct ReminderLinks: Codable {
     var exports: [UUID: ReminderExport]?
 
     mutating func updateExport(_ taskID: UUID, _ body: (inout ReminderExport) -> Void) throws {
-        guard var link = exports?[taskID] else { throw PrototypeError.unavailable("提醒事项关联不可用。") }
+        guard var link = exports?[taskID] else { throw AppError.unavailable("提醒事项关联不可用。") }
         body(&link)
         exports?[taskID] = link
     }
@@ -350,7 +350,7 @@ final class MacReminders: ObservableObject {
                         lists = authorized ? source.lists() : []
                         if selectedListID == scope.listID || !authorized { candidates = []; selectedListID = nil }
                         for id in linked.keys { handoffStates[id] = .needsReview }
-                        throw PrototypeError.unavailable("清单或授权已变化，请重新检查。")
+                        throw AppError.unavailable("清单或授权已变化，请重新检查。")
                     }
                     let scoped = items.filter { $0.scope == scope }
                     let refreshed = try ReminderLinks.read(from: store.directory)
@@ -414,27 +414,27 @@ final class MacReminders: ObservableObject {
             let reservation: ReminderExport
             if retryConfirmedByUser {
                 guard let previous, previous.externalID == nil else {
-                    throw PrototypeError.unavailable("仅可重试尚未确认的发送。")
+                    throw AppError.unavailable("仅可重试尚未确认的发送。")
                 }
                 reservation = previous
             } else {
-                guard previous == nil else { throw PrototypeError.unavailable("此任务已有发送记录，请刷新核对。") }
-                guard let selected = initial.selected else { throw PrototypeError.unavailable("请选择可写的提醒事项清单。") }
+                guard previous == nil else { throw AppError.unavailable("此任务已有发送记录，请刷新核对。") }
+                guard let selected = initial.selected else { throw AppError.unavailable("请选择可写的提醒事项清单。") }
                 reservation = ReminderExport(scope: selected, marker: AppDestination.task(id).url, due: due)
             }
             let scope = reservation.scope
             guard source.lists().contains(where: { $0.scope == scope }) else {
-                throw PrototypeError.unavailable("原清单当前不可写，请检查账户和清单。")
+                throw AppError.unavailable("原清单当前不可写，请检查账户和清单。")
             }
             let existing = try await source.reminders(in: scope, includingCompleted: true)
             guard isCurrent(token, store: store) else { return }
             guard source.authorized, source.lists().contains(where: { $0.scope == scope }) else {
-                throw PrototypeError.unavailable("清单或授权已变化。")
+                throw AppError.unavailable("清单或授权已变化。")
             }
             let matches = existing.filter { $0.scope == scope && $0.marker == reservation.marker }
             if !matches.isEmpty {
                 guard retryConfirmedByUser, matches.count == 1 else {
-                    throw PrototypeError.unavailable("清单中已有相同的任务链接，请核对已有提醒。")
+                    throw AppError.unavailable("清单中已有相同的任务链接，请核对已有提醒。")
                 }
                 try reconcile(id, link: reservation, matches: matches, store: store)
                 message = handoffStatus(for: id) == .sent ? "已找到原提醒。" : "原提醒的身份仍待核对。"
@@ -442,16 +442,16 @@ final class MacReminders: ObservableObject {
             }
             guard let task = try store.snapshots().first(where: { $0.id == id }),
                   task.deletedAt == nil, !task.isCompleted else {
-                throw PrototypeError.unavailable("只能发送当前库中未完成的任务。")
+                throw AppError.unavailable("只能发送当前库中未完成的任务。")
             }
             // Reserve before calling EventKit. An ordinary retry never creates a second reminder.
             try ReminderLinks.update(in: store.directory) { links in
                 if retryConfirmedByUser {
                     guard let pending = links.exports?[id], pending.externalID == nil, pending.scope == scope,
-                          pending.marker == reservation.marker else { throw PrototypeError.unavailable("发送状态已变化。") }
+                          pending.marker == reservation.marker else { throw AppError.unavailable("发送状态已变化。") }
                 } else {
                     guard links.selected == scope, links.exports?[id] == nil else {
-                        throw PrototypeError.unavailable("清单或发送状态已变化，请刷新。")
+                        throw AppError.unavailable("清单或发送状态已变化，请刷新。")
                     }
                     if links.exports == nil { links.exports = [:] }
                     links.exports?[id] = reservation
@@ -461,7 +461,7 @@ final class MacReminders: ObservableObject {
             handoffs[id] = reservation
             let item = try source.create(title: task.title, due: reservation.due, marker: reservation.marker, in: scope)
             guard item.scope == scope, item.marker == reservation.marker, !item.externalID.isEmpty else {
-                throw PrototypeError.unavailable("发送结果待核对，请刷新。")
+                throw AppError.unavailable("发送结果待核对，请刷新。")
             }
             try confirm(id, externalID: item.externalID, directory: store.directory)
             message = "已发送到提醒事项。"
@@ -474,7 +474,7 @@ final class MacReminders: ObservableObject {
     private func confirm(_ id: UUID, externalID: String, directory: URL) throws {
         try ReminderLinks.update(in: directory) { links in
             guard let record = links.exports?[id], record.externalID == nil || record.externalID == externalID else {
-                throw PrototypeError.unavailable("提醒事项身份不一致，请核对原清单。")
+                throw AppError.unavailable("提醒事项身份不一致，请核对原清单。")
             }
             try links.updateExport(id) { $0.externalID = externalID; $0.status = .sent }
         }
@@ -539,7 +539,7 @@ final class MacReminders: ObservableObject {
         do {
             _ = try TaskStore.validTitle(candidate.title)
             let taskID = try ReminderLinks.update(in: store.directory) { links in
-                guard links.selected == candidate.scope else { throw PrototypeError.unavailable("清单已变化，请刷新。") }
+                guard links.selected == candidate.scope else { throw AppError.unavailable("清单已变化，请刷新。") }
                 if let existing = links.imports.first(where: { $0.matches(candidate) }) { return existing.taskID }
                 let id = UUID()
                 links.imports.append(ReminderImport(scope: candidate.scope, externalID: candidate.externalID, taskID: id))
@@ -548,7 +548,7 @@ final class MacReminders: ObservableObject {
             try store.createTask(id: taskID, title: candidate.title, body: candidate.notes)
             try ReminderLinks.update(in: store.directory) { links in
                 guard let index = links.imports.firstIndex(where: { $0.taskID == taskID }) else {
-                    throw PrototypeError.unavailable("导入关联不可用，请检查本机数据。")
+                    throw AppError.unavailable("导入关联不可用，请检查本机数据。")
                 }
                 links.imports[index].committed = true
             }

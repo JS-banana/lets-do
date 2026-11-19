@@ -18,10 +18,10 @@ struct SetTaskCompletedIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         do {
-            guard let id = UUID(uuidString: taskID) else { throw PrototypeError.invalid("无效的任务 UUID。") }
+            guard let id = UUID(uuidString: taskID) else { throw AppError.invalid("无效的任务 UUID。") }
             let session = try StoreSession.forExtension()
             guard !namespace.isEmpty, session.namespace == namespace else {
-                throw PrototypeError.unavailable("任务库已变化，请刷新小组件后重试。")
+                throw AppError.unavailable("任务库已变化，请刷新小组件后重试。")
             }
             let store = try TaskStore(directory: session.directory(), isExtension: true, session: session)
             defer { try? store.close() }
