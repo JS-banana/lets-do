@@ -9,7 +9,7 @@ import zipfile
 
 BRANCH = "mac-updates"
 FILE = "appcast.xml"
-BUNDLE = "com.panion.todo.m0.mac"
+BUNDLE = "com.panion.letsdo"
 NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 SPARKLE = "{" + NAMESPACE + "}"
 ET.register_namespace("sparkle", NAMESPACE)

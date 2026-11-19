@@ -60,7 +60,7 @@ def parse_test_summary(log_path):
 
 def parse_local_capture_metrics(log_path):
     """Read the last valid single-line local capture metrics marker from a test log."""
-    marker = "M0_LOCAL_CAPTURE_METRICS"
+    marker = "LETSDO_CAPTURE_METRICS"
     metrics = None
     for line in log_path.read_text(errors="replace").splitlines():
         if not line.startswith(marker):
@@ -94,13 +94,13 @@ def collect_source_hashes():
 source_sha256 = collect_source_hashes()
 jobs = []
 if args.check == "distribution-build":
-    jobs = [("mac-distribution-build", "TodoM0Distribution", "generic/platform=macOS",
+    jobs = [("mac-distribution-build", "LetsDoDistribution", "generic/platform=macOS",
              ["build", "CODE_SIGNING_ALLOWED=NO", "ARCHS=arm64 x86_64", "ONLY_ACTIVE_ARCH=NO"])]
 elif args.check == "build":
-    jobs = [("mac-build", "TodoM0Mac", "platform=macOS,arch=" + platform.machine(), ["build"])]
+    jobs = [("mac-build", "LetsDo", "platform=macOS,arch=" + platform.machine(), ["build"])]
 else:
-    target = "TodoM0Tests"
-    jobs = [(args.check, "TodoM0Mac", "platform=macOS,arch=" + platform.machine(), ["test", f"-only-testing:{target}",
+    target = "LetsDoTests"
+    jobs = [(args.check, "LetsDo", "platform=macOS,arch=" + platform.machine(), ["test", f"-only-testing:{target}",
               "-resultBundlePath", str(output / f"{args.check}.xcresult"), "-parallel-testing-enabled", "NO"])]
 
 results = []
@@ -135,7 +135,7 @@ for name, scheme, destination, extra in jobs:
 registration_cleanup = []
 cleanup_passed = True
 app = ROOT / ".build" / derived / "Build" / "Products" / configuration / "Let's Do.app"
-widget = app / "Contents" / "PlugIns" / "TodoM0MacWidget.appex"
+widget = app / "Contents" / "PlugIns" / "LetsDoWidget.appex"
 if app.is_dir():
     register = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
     for name, command, required in [
@@ -162,7 +162,7 @@ source_changed = sorted(path for path in set(source_sha256) | set(source_sha256_
                         if source_sha256.get(path) != source_sha256_after.get(path))
 automated_checks = "Formal Xcode build jobs."
 if args.check == "unit":
-    automated_checks += " TodoM0Tests XCTest results are parsed from the command log."
+    automated_checks += " LetsDoTests XCTest results are parsed from the command log."
 report = {"timestamp": stamp, "kind": args.check, "configuration": configuration,
           "hostOS": platform.mac_ver()[0], "architecture": platform.machine(),
           "xcode": subprocess.run(["xcodebuild", "-version"], capture_output=True, text=True).stdout.strip(),

@@ -1,7 +1,7 @@
 import XCTest
 import SwiftUI
 import WidgetKit
-@testable import TodoM0
+@testable import LetsDo
 
 final class WeekTaskOverviewTests: XCTestCase {
     private let gmt = TimeZone.gmt

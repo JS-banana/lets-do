@@ -11,7 +11,7 @@ enum AppDestination: Equatable, Sendable {
     case capture(TaskSchedule)
 
     static var scheme: String {
-        Bundle.main.object(forInfoDictionaryKey: "M0URLScheme") as? String ?? "todom0"
+        Bundle.main.object(forInfoDictionaryKey: "LetsDoURLScheme") as? String ?? "letsdo"
     }
 
     var url: URL {

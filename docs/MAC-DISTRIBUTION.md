@@ -4,7 +4,7 @@
 
 v0.2.0 的 MacDistribution 包复用现有 Mac App、Widget targets 和 Core Data 模型，包含「今天的任务」「本周计划」「月历总览」。完成按钮提交明确的完成状态；任务、日期和「快速记」链接打开主应用相应入口。
 
-公开主应用身份为 `com.panion.todo.m0.mac`，Widget 为对应的 `.widget`，URL scheme 为 `todom0`。MacDistribution 使用独立编译条件，主应用非沙盒，Widget 保留沙盒。Local 与 MacDistribution 的库路径和权限见[开发配置](DEVELOPMENT.md#配置与-scheme)。
+从 v0.4.0 起，分发主应用身份为 `com.panion.letsdo`，Widget 为对应的 `.widget`，URL scheme 为 `letsdo`。MacDistribution 使用独立编译条件，主应用非沙盒，Widget 保留沙盒。Local 与 MacDistribution 的库路径和权限见[开发配置](DEVELOPMENT.md#配置与-scheme)。
 
 ## 应用内更新的进程与权限
 
@@ -14,9 +14,9 @@ ad hoc 签名没有 Team ID，Hardened Runtime 的默认库校验会拒绝加载
 
 ## 单库与共享门禁
 
-唯一可修改的任务库位于 **Widget 自身 Application Support** 下的 `TodoM0/MacDistribution/<命名空间>/`。Widget 使用系统提供的自身目录；非沙盒主应用按固定 Widget 身份定位同一目录。角色、身份字段、路径及命名空间校验集中在 [StoreSession](../Shared/StoreSession.swift)，不维护多位置副本或另一份可写快照。当前任务库目录或其直接父目录是符号链接时，拒绝开库。
+唯一可修改的任务库位于 **Widget 自身 Application Support** 下的 `LetsDo/MacDistribution/<命名空间>/`。Widget 使用系统提供的自身目录；非沙盒主应用按固定 Widget 身份定位同一目录。角色、身份字段、路径及命名空间校验集中在 [StoreSession](../Shared/StoreSession.swift)，不维护多位置副本或另一份可写快照。当前任务库目录或其直接父目录是符号链接时，拒绝开库。
 
-显式传入 `-M0Run` 时使用 `dist-<名称>`，`manual` 的任意大小写写法均会被拒绝。无参数冷启沿用已核验的会话，没有会话记录时使用 `dist-manual`。已保存的手工库会话也只接受 `dist-manual`，遇到 `dist-MANUAL` 等大小写变体时拒绝开库。
+显式传入 `-LetsDoRun` 时使用 `dist-<名称>`，`manual` 的任意大小写写法均会被拒绝。无参数冷启沿用已核验的会话，没有会话记录时使用 `dist-manual`。已保存的手工库会话也只接受 `dist-manual`，遇到 `dist-MANUAL` 等大小写变体时拒绝开库。
 
 [TaskStore](../Shared/TaskStore.swift) 统一处理主应用、Widget 和 Intent 的 Core Data 操作。主应用负责建库和模型迁移，启动时先阻断扩展，关闭旧连接，打开目标库，再发布就绪会话。扩展只访问已核验的现有库，不建库、不迁移。
 
@@ -45,4 +45,4 @@ macOS 的容器权限仍由系统决定。[Apple 的容器访问说明](https://
 
 公开按[发布说明](RELEASING.md)重新核对已验收 manifest 和既有草稿资产，不重建、重签或替换资产。后续版本须重新记录实际覆盖与未覆盖范围，不自动继承本次结果；刷新接口调用也不能代替真实时间线观察。
 
-测试使用隔离数据，临时应用、Widget 登记和数据须按本轮精确路径清理，不重置全局系统登记或触碰其他应用。`-M0Run` 只隔离任务库；同身份的分发包仍会切换系统 Widget 的当前会话，无参数重启会沿用该会话，不能当作恢复日常库的步骤。日常应用或 Widget 正在使用时，应改用独立 macOS 测试用户验证同一候选。系统提醒事项与 TCC 授权也不由 `-M0Run` 隔离。公开文档不保存私有路径、测试任务标识、通过计数或逐次运行流水。
+测试使用隔离数据，临时应用、Widget 登记和数据须按本轮精确路径清理，不重置全局系统登记或触碰其他应用。`-LetsDoRun` 只隔离任务库；同身份的分发包仍会切换系统 Widget 的当前会话，无参数重启会沿用该会话，不能当作恢复日常库的步骤。日常应用或 Widget 正在使用时，应改用独立 macOS 测试用户验证同一候选。系统提醒事项与 TCC 授权也不由 `-LetsDoRun` 隔离。公开文档不保存私有路径、测试任务标识、通过计数或逐次运行流水。

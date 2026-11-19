@@ -1,4 +1,4 @@
-#if M0_DISTRIBUTION
+#if MAC_DISTRIBUTION
 import AppKit
 import SwiftUI
 
