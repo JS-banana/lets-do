@@ -1,61 +1,64 @@
 # Mac 与系统提醒事项
 
-在 iPhone 的「提醒事项」中记下一件事，在 Mac 的 Let’s Do 打开「待办」，点标题旁的「从提醒事项导入」图标，再按周或日安排；已选清单有可导入的事项时，图标会换成「提醒事项有 N 条新事项」。公开版 v0.3.0 的同一入口在「收集箱」。两台设备登录同一 Apple 账户，并在 iCloud 设置里开启「提醒事项」。建议在 iCloud 下建一份「Let’s Do」清单，导入时核对账户名和清单名。同名本机清单只存在于该 Mac。[Apple 设置指引](https://support.apple.com/guide/icloud/mmbf52194b5a/icloud)
+Mac 主应用通过 EventKit 读写系统提醒事项。任务、周计划、正文版本、草稿和回收站由 TaskStore 管理。Widget 读取本机任务库，跨设备传播由系统提醒事项负责。操作步骤见[使用指南](USAGE.md#与手机上的提醒事项配合)。
 
-## 实施顺序和数据所有权
+## 导入映射与去重
 
-| 阶段 | 用户动作 | 保存位置与验收条件 |
-|---|---|---|
-| 1 · 手机记录，Mac 安排 | 待办 → 从提醒事项导入 → 授权 → 选清单 → 导入 | 导入一条才创建一个本机任务。再次打开、刷新或重试均只出现一个 UUID |
-| 2 · 指定任务发到手机 | 任务详情 → 更多 → 发送到提醒事项；在 iPhone 的同一清单里勾选完成 | Mac 在该条关联上读取到完成后，只将原任务的完成状态设为真 |
-
-Let’s Do 的任务、周计划、版本、草稿和回收站继续由 TaskStore 管理。系统负责把 iCloud 清单的提醒事项送到另一台设备，两端有可能在不同时刻才看到变化。
-
-## 数据映射与失败处理
-
-| 系统提醒事项 | 导入后的 Let’s Do 任务 |
+| 情况 | 处理 |
 |---|---|
-| 未完成事项的标题、纯文本备注 | 交给现有 TaskStore 建立任务和初始正文版本 |
-| 源截止日期／时间 | 候选行展示原值。新任务无日期，之后可在 Let’s Do 安排 |
-| 重复、优先级、附件、子任务结构或闹钟 | 当前导入只复制标题、备注。原项及其设置留在系统提醒事项 |
-| 已完成或已导入的原项 | 不列作新的候选。删除、完成或改名原项不会覆盖已导入的任务 |
+| 未完成提醒的标题和纯文本备注 | 用 `TaskStore.createTask` 建立任务，有备注时一并创建初始正文版本 |
+| 源截止日期或时间 | 只供候选行显示，本机任务的安排留空 |
+| 重复、优先级、附件、子任务或闹钟 | 不写入任务模型，保留系统原项 |
+| 已完成、已确认导入或能识别为已发送的提醒 | 从导入候选中排除 |
+| 服务端事项标识缺失或在清单内重复 | 暂缓导入，保留原项 |
 
-清单由用户从可写清单中选择。清单选择和关联表随当前任务库保存在本机的 `reminders-links.json`，只存标识及处理状态。先持久化任务 UUID，再调用幂等的 `createTask`，最后确认关联。清单来源、清单标识和服务端事项标识一起用于去重，当前清单中归属不唯一的来源项暂缓导入。切库丢弃旧请求的响应。任务 JSON 备份只包含任务数据，在从备份新建的隔离库中需重新选择清单。
+去重键由来源标识、清单标识和服务端事项标识组成。系统完整同步可能改变本机事项标识，服务端标识也可能重复，因此不能凭标题或截止日期认定同一事项。[本机标识](https://developer.apple.com/documentation/eventkit/ekcalendaritem/calendaritemidentifier) · [服务端标识](https://developer.apple.com/documentation/eventkit/ekcalendaritem/calendaritemexternalidentifier)
 
-Apple 说明本机事项标识可能在完整同步后改变，服务器提供的标识也可能重复；标题或截止相同不足以判断同一事项。[本机标识](https://developer.apple.com/documentation/eventkit/ekcalendaritem/calendaritemidentifier) · [服务端标识](https://developer.apple.com/documentation/eventkit/ekcalendaritem/calendaritemexternalidentifier)
+可写清单的选择和导入、发送关联随当前任务库保存在 `reminders-links.json`。导入时先持久化任务 UUID，再幂等创建任务，最后确认关联。中断后沿用同一 UUID。切库时丢弃旧库的异步响应。[MacReminders](../App/MacReminders.swift)
 
-## 将指定任务发到 iPhone
+## 发送关联与失败处理
 
-发送时使用已保存的标题和用户选定的清单，默认无截止。需要日期时单独勾选并选一天，写为全天截止。Let’s Do 的今天、周计划、跨日区间和正文都留在原任务。此版未提供具体时刻、闹钟或通知送达承诺。应用写入任务链接供原提醒与任务 UUID 配对。[EventKit 全天截止](https://developer.apple.com/documentation/eventkit/ekreminder/duedatecomponents)
+发送只接受当前库中未删除、未完成的任务。主应用先将任务 UUID、原清单、任务链接和可选截止日写入关联表，再创建系统提醒。EventKit 写入已保存的标题和任务链接，有截止日时只写年、月、日。[EventKit 全天截止](https://developer.apple.com/documentation/eventkit/ekreminder/duedatecomponents)
 
-| 后续变化 | Mac 的处理 |
+| 情况 | 处理 |
 |---|---|
-| 手机勾选已发送项 | 确认来源、清单、任务链接和事项身份后，调用 `TaskStore.setCompleted` 把任务设为已完成。该次完成被消费后，本机再打开任务可保持未完成 |
-| 手机取消勾选、改标题或删除提醒，或 Mac 移除任务 | 两端独立保留文字、安排和删除状态。缺项不删除本机任务；也不自动重建远端提醒 |
-| 只在 Mac 导入过，在手机完成原始提醒 | 本机导入项保持原状态。只有从 Mac 明确发送的提醒才有完成回写关联 |
-| 授权被撤、清单消失或同链接出现多条 | 暂停对该关联的写入。恢复访问并刷新后核实。弹窗可重新选择清单，已发送项继续按它原来的清单核对 |
-| 保存过程中退出，或 EventKit 返回结果不确定 | 发送前先将任务与原清单的关联落盘。下次若找到唯一匹配，恢复关联；没有确定结果时显示待核对。仅未确认过的发送提供手动重试。用户核实原清单并确认后，应用再次查找同一链接；找到唯一一条就恢复关联，否则在原清单按原截止日尝试创建。多重匹配会暂停。系统晚到仍可能产生重复。已确认的发送无法借此重发 |
+| 原清单中有唯一匹配 | 核对来源、清单、任务链接和事项身份后，保存服务端标识并确认发送 |
+| 权限撤销或原清单不可用 | 暂停关联写入，恢复访问后仍按原清单核对 |
+| 链接消失、匹配多条或事项身份变化 | 标记待核对，保留本机任务，不自动补发 |
+| EventKit 保存中断或结果不确定 | 保留发送记录，刷新时先在原清单查找唯一匹配 |
+| 用户确认重试尚未确认的发送 | 再查原清单。唯一匹配时恢复关联，多条时暂停，无匹配时才按原截止日重建 |
+| 系统提醒延迟到达 | 手动重试仍可能产生重复。已确认的发送不允许重发 |
 
-完成回收先在关联表预留稳定的操作 UUID，TaskStore 在现有写锁内核对完整持久化历史中的事务作者，并将完成状态与该操作凭据一同提交。写锁忙或提交失败时保留同一 UUID 重试；期间修改标题、正文或计划不会丢弃完成。若任务已提交但关联确认中断，重启或另一个主应用实例会读到数据库凭据，不重复关闭后来手动重开的任务。历史消费只推进读取游标，不删除这些凭据。旧版仅有修改时间基线的中断记录不能证明是否已经完成，保持「待核对」并提示用户在本机检查完成状态，不自动消费或重新关闭任务。
+主应用在启动、回到前台及收到 `EKEventStoreChanged` 时重新读取已关联清单。自动刷新使用已有授权。重新选择清单只影响之后的导入和新发送，既有关联仍指向原清单。[AppModel](../App/AppModel.swift) · [TodoApp](../App/TodoApp.swift) · [EventKit 变更通知](https://developer.apple.com/documentation/eventkit/updating-with-notifications)
 
-Mac 主应用在启动、回到前台和收到 `EKEventStoreChanged` 时重新读取已关联清单。关掉 Mac 或真正退出应用后，手机仍可完成提醒，打开 Mac 应用并等系统提醒事项同步到本机后才会反映到任务和 Widget。自动刷新不会向用户请求权限。[EventKit 变更通知](https://developer.apple.com/documentation/eventkit/updating-with-notifications)
+## 完成回写
 
-## 代码、权限和签名
+只有发送关联的唯一匹配项可以触发完成回写。Mac 核实提醒已完成后，先在关联表预留稳定的操作 UUID。TaskStore 持写锁核对完整持久化历史中的事务作者，再将目标完成状态和操作凭据一同提交。历史消费只推进读取游标，保留操作凭据。[MacReminders](../App/MacReminders.swift) · [TaskStore](../Shared/TaskStore.swift)
 
-Mac 主应用中的 [MacReminders](../App/MacReminders.swift) 封装 EventKit、选择和关联。主窗口随任务库绑定／解绑，Widget 只读取既有任务库。Local 和 MacDistribution 主应用均声明 `NSRemindersFullAccessUsageDescription`。用户主动点击授权时才请求提醒事项完整访问；系统没有只读提醒事项授权档位。清单不可用时需重新选择，拒绝后可到「隐私与安全性 → 提醒事项」恢复权限。[EventKit 授权](https://developer.apple.com/documentation/eventkit/accessing-the-event-store)
+| 情况 | 处理 |
+|---|---|
+| 写锁忙或数据库提交失败 | 保留操作 UUID 重试。期间编辑标题、正文或计划不影响这次完成 |
+| 任务已提交，关联确认中断 | 重启或另一主应用实例按同一凭据确认，保留后来手动重开的状态 |
+| 旧中断记录只有修改时间基线 | 提示在本机核对完成状态，不自动消费记录或再次完成任务 |
+| 提醒取消完成、改名或被删除 | 保留原任务的状态、文字与计划 |
+| 本机任务已删除 | 不恢复任务，不删除对应的系统提醒 |
 
-分发脚本给最终主应用签入 `com.apple.security.personal-information.calendars`，校验用途文案、主程序和 Widget 各自的签名权限。这个名称涵盖 EventKit 资源，应用只请求提醒事项。清单来自用户的系统账户。ad hoc 签名和系统隐私授权属于不同环节，重新构建后需实际测试授权能否延续。[Hardened Runtime](https://developer.apple.com/documentation/xcode/configuring-the-hardened-runtime) · [代码签名身份](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
+## 权限与签名
+
+主窗口切换任务库时更新提醒事项关联。Local 和 MacDistribution 主应用都声明 `NSRemindersFullAccessUsageDescription`，仅在用户主动授权时请求提醒事项完整访问。EventKit 没有只读提醒事项授权档位。[MacReminders](../App/MacReminders.swift) · [EventKit 授权](https://developer.apple.com/documentation/eventkit/accessing-the-event-store)
+
+打包脚本给最终主应用签入 `com.apple.security.personal-information.calendars`，并校验用途文案以及主应用和 Widget 各自的签名权限。该权限涵盖 EventKit 资源，主应用只请求提醒事项。ad hoc 构建覆盖升级后，系统隐私授权能否延续需真机验证。[打包脚本](../scripts/package-mac.py) · [Hardened Runtime](https://developer.apple.com/documentation/xcode/configuring-the-hardened-runtime) · [代码签名身份](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
 
 ## 验收步骤
 
-自动检查使用隔离的临时任务库和可控提醒事项来源。[提醒事项测试](../Tests/MacRemindersTests.swift)覆盖导入、重试、标识变化、切库、写锁失败后编辑再重试，以及完成回收中断后的重开保护；[存储测试](../Tests/TaskStoreTests.swift)覆盖操作凭据跨实例、历史消费和重启后的幂等性。运行 [Mac 单元测试](DEVELOPMENT.md#检查与构建)，再按[本机打包说明](RELEASING.md#本机打包与留证)检查最终 Mac 包。原生授权弹窗、系统提醒事项和跨设备传播需单独验证。
+使用可控提醒事项来源的单元测试覆盖导入、重试、标识变化、切库、写锁失败后编辑再重试，以及完成回写中断后的重开保护。存储测试覆盖操作凭据跨实例、历史消费和重启后的幂等性。[提醒事项测试](../Tests/MacRemindersTests.swift) · [存储测试](../Tests/TaskStoreTests.swift)
 
-用测试清单、同一个候选安装包及 SHA-256 记录结果。下列项目待真机验收：
+运行 Mac 单元测试，检查最终包的用途文案与签名。以下项目待真机验收，使用测试清单和同一份候选安装包，记录其 SHA-256。覆盖升级还需标明被替换的旧包。[检查与构建](DEVELOPMENT.md#检查与构建) · [本机打包](RELEASING.md#本机打包与留证) · [候选资产验收](MAC-DISTRIBUTION.md#候选资产验收)
 
 1. **首次授权与撤销。** 在 Mac 上打开「待办」，确认启动无弹窗。打开导入面板，分别测试拒绝和授权、系统设置恢复、运行中撤销。已有任务仍可编辑。
 2. **手机到 Mac。** 在 iPhone 的 iCloud 测试清单新增两条同名不同备注的待办，一条含到期时间。等 Mac 系统提醒事项也看得到后导入，核对备注、源截止和本机无日期。导入仅一条并重启，检查另一条仍可选。把导入任务移到回收站，再刷新，确认未被复活。
 3. **清单和离线。** 准备同名本机清单和 iCloud 清单，只选择后者。断网新建手机提醒，联网后分别记录 Mac 系统清单和 Let’s Do 可见时间。移除原清单或切换账户后检查没有从另一份同名清单导入。
-4. **安装包升级与 Widget。** 在相同安装路径用后一份真实 ad hoc 构建覆盖前一份，记录系统是否重新询问权限，复核关联保留、已导入任务可正常安排、Widget 按原任务显示。只公开系统／版本、散列、动作和结果，个人任务与账户标识留在本机。
+4. **安装包升级与 Widget。** 在相同安装路径用后一份真实 ad hoc 构建覆盖前一份，记录系统是否重新询问权限，复核关联保留、已导入任务可正常安排、Widget 按原任务显示。
 5. **Mac 到手机。** 将一条「本周待安排」任务无截止发送，再将一条跨天任务指定独立截止日发送。分别核对 iPhone 系统提醒的标题和日期，以及 Mac 原计划。连续点击、切清单、退出重开后，检查原清单各只有一条。再打开导入面板，验证刚刚发送的提醒不能导入成第二条任务。
-6. **离线完成和恢复。** 退出 Mac 应用，断网在手机上完成已发送项，恢复网络。等 Mac 系统提醒事项显示完成，再打开 Let’s Do；核对原 UUID 完成、备注和计划保留、Widget 随本机库更新。本机手动标回未完成，再刷新应保持未完成。另取一条只导入的原提醒，重复勾选操作，确认本机状态独立。
+6. **离线完成和恢复。** 退出 Mac 应用，断网在手机上完成已发送项，恢复网络。等 Mac 系统提醒事项显示完成，再打开 Let’s Do，核对原 UUID 完成、备注和计划保留、Widget 随本机库更新。本机手动标回未完成，再刷新应保持未完成。另取一条只导入的原提醒，重复勾选操作，确认本机状态独立。
 7. **识别失败。** 用测试清单验证手机删除、移动、改链接及清单授权撤销后，不误删本机、不自动补发、不把其他同名待办标为完成。记录候选安装包、系统版本、Mac 系统提醒是否已经收到、应用何时读取到。
