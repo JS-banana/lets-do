@@ -21,7 +21,7 @@ Local 的手工库位于用户 Application Support 下的 `TodoM0/Local/local-ma
 
 Mac 的 XCTest 宿主通过测试 scheme 的 `M0_UNIT_TEST_HOST=1` 跳过自动开库；测试自行创建临时 TaskStore，不打开手工库。
 
-MacDistribution 主应用保留非沙盒运行方式，Widget 保留沙盒。其命名空间、容器访问、旧 Local 升级与真实验收规则集中在 [Mac 分发说明](MAC-DISTRIBUTION.md)。自动运行名称必须以字母或数字开头，最多 70 个字母、数字或连字符；分发配置会拒绝缺值、重复参数、非法名称及保留名称，不回落手工库。
+MacDistribution 主应用保留非沙盒运行方式，Widget 保留沙盒。其命名空间、容器访问与真实验收规则集中在 [Mac 分发说明](MAC-DISTRIBUTION.md)。自动运行名称必须以字母或数字开头，最多 70 个字母、数字或连字符；分发配置会拒绝缺值、重复参数、非法名称及保留名称，不回落手工库。
 
 Mac 主应用可通过 EventKit 接入用户选择的系统提醒事项清单。配置、映射与双设备验收见[提醒事项方案](MAC-REMINDERS.md)。
 
@@ -47,11 +47,10 @@ Mac 主应用可通过 EventKit 接入用户选择的系统提醒事项清单。
 |---|---|
 | `App/` | 应用窗口、任务编辑、周历、月历与启动协调 |
 | `Shared/StoreSession.swift` | 配置、进程角色、路径、命名空间及共享会话门禁 |
-| `Shared/LocalLibraryUpgrade.swift` | MacDistribution 的旧 Local 库升级与中断恢复 |
 | `Shared/TaskStore.swift` | Core Data 读写、锁、正文版本、草稿与历史消费 |
 | `Shared/TaskIntents.swift` | Widget 的任务完成动作 |
 | `Widgets/` | WidgetKit 扩展入口 |
-| `Tests/` | 日期、排布、书写、会话、升级与存储检查 |
+| `Tests/` | 日期、排布、书写、会话、模型迁移与存储检查 |
 | `Config/` | 构建配置、Info.plist 与权限 |
 | `scripts/` | 构建、测试、打包及发布入口 |
 
