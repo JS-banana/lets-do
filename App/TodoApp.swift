@@ -4,6 +4,9 @@ import SwiftUI
 @main
 struct TodoApp: App {
     @StateObject private var model = PrototypeModel()
+    #if os(macOS) && M0_DISTRIBUTION
+    @StateObject private var updates = MacUpdates()
+    #endif
     @Environment(\.scenePhase) private var scenePhase
     private let isUnitTestHost = ProcessInfo.processInfo.environment["M0_UNIT_TEST_HOST"] == "1"
 
@@ -13,6 +16,9 @@ struct TodoApp: App {
                 .task {
                     // Hosted tests open their own temporary TaskStore instances.
                     guard !isUnitTestHost else { return }
+                    #if os(macOS) && M0_DISTRIBUTION
+                    updates.startIfEnabled()
+                    #endif
                     if !model.loaded { await model.start() }
                 }
                 #if os(macOS)
@@ -25,7 +31,17 @@ struct TodoApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1160, height: 800)
         .handlesExternalEvents(matching: ["\(AppDestination.scheme)://task", "\(AppDestination.scheme)://calendar", "\(AppDestination.scheme)://open"])
-        .commands { TaskCommands(model: model) }
+        .commands {
+            TaskCommands(model: model)
+            #if M0_DISTRIBUTION
+            CommandGroup(after: .appInfo) {
+                if updates.available {
+                    Button("检查更新…") { updates.check() }
+                    Toggle("自动检查更新", isOn: Binding(get: { updates.automatic }, set: updates.setAutomatic))
+                }
+            }
+            #endif
+        }
         #endif
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && model.loaded {

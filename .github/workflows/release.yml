@@ -91,6 +91,7 @@ jobs:
         run: python3 scripts/check.py unit
       - name: Build and verify certificate-free Mac assets
         env:
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
           RELEASE_BUILD_NUMBER: ${{ needs.validate.outputs.build_number }}
@@ -144,7 +145,7 @@ jobs:
   publish:
     needs: validate
     if: github.event_name == 'workflow_dispatch' && inputs.publish_existing_draft
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     timeout-minutes: 15
     permissions:
       contents: write
@@ -159,6 +160,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ inputs.make_latest && secrets.SPARKLE_PRIVATE_ED_KEY || '' }}
           CANDIDATE_MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
           MAKE_LATEST: ${{ inputs.make_latest }}
           GH_TOKEN: ${{ github.token }}
