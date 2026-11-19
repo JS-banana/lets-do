@@ -196,7 +196,7 @@ try:
         "SWIFT_ACTIVE_COMPILATION_CONDITIONS=M0_DISTRIBUTION", "SWIFT_OPTIMIZATION_LEVEL=-O",
         "SWIFT_COMPILATION_MODE=wholemodule", "ENABLE_DEBUG_DYLIB=NO", "ENABLE_TESTABILITY=NO",
         "DEVELOPMENT_TEAM=", "CODE_SIGN_IDENTITY=-", "CODE_SIGNING_ALLOWED=NO", "CODE_SIGN_ENTITLEMENTS=",
-        "CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO", "M0_APP_GROUP=", "M0_CLOUD_CONTAINER=",
+        "CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO", "M0_APP_GROUP=",
         "M0_BUNDLE_PREFIX=com.panion.todo.m0", "M0_URL_SCHEME=todom0",
         f"MARKETING_VERSION={version}", f"CURRENT_PROJECT_VERSION={build_number}",
     ])
@@ -223,7 +223,7 @@ try:
         require(data.get("M0DistributionAppIdentifier") == info["CFBundleIdentifier"] and
                 data.get("M0DistributionWidgetIdentifier") == widget_info["CFBundleIdentifier"] and
                 data.get("M0URLScheme") == "todom0", "Distribution storage and URL identities must match in both bundles.")
-        require(not data.get("M0CloudContainer") and not data.get("M0AppGroup"), "Distribution must not select cloud or App Group storage.")
+        require(not data.get("M0AppGroup"), "Distribution must not select App Group storage.")
         resources = bundle / "Contents" / "Resources"
         require((resources / "Model.momd").is_dir(), "A bundle is missing its versioned Core Data model.")
         metadata = json.loads((resources / "Metadata.appintents" / "extract.actionsdata").read_bytes())

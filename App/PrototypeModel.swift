@@ -1,4 +1,3 @@
-import CloudKit
 import Combine
 import Foundation
 import WidgetKit
@@ -15,12 +14,6 @@ final class PrototypeModel: ObservableObject {
     @Published var selection: UUID?
     @Published var storePath = ""
     @Published var loaded = false
-    @Published private(set) var cloudSyncEnabled = StoreSession.supportsCloudSync
-        && UserDefaults.standard.bool(forKey: "M0CloudSyncEnabled")
-    @Published private(set) var checkingAccount = false
-    @Published private(set) var cloudAccountIssue: String?
-    @Published private(set) var cloudSyncStatus = CloudSyncStatus()
-    @Published private(set) var session: StoreSession?
     struct CompletionFeedback: Identifiable {
         let id = UUID()
         let taskID: UUID
@@ -41,57 +34,12 @@ final class PrototypeModel: ObservableObject {
             }
     }
     private(set) var store: TaskStore?
-    private var accountObserver: NSObjectProtocol?
-    private var starting = false
-    private var restartRequested = false
     private var taskToOpen: UUID?
     private var waitingToOpenNoticeShown = false
-    private var accountCheckID = UUID()
     private var startedDistributionDirectory: URL?
 
     var selected: TaskSnapshot? { tasks.first { $0.id == selection } }
     var active: [TaskSnapshot] { tasks.filter { $0.deletedAt == nil } }
-
-    var cloudAccountTitle: String {
-        if !StoreSession.supportsCloudSync { return "此版本使用本机存储" }
-        if !cloudSyncEnabled { return "未开启 iCloud 同步" }
-        if checkingAccount { return "正在检查 Apple 账户…" }
-        if cloudAccountIssue != nil { return "iCloud 暂不可用" }
-        if !loaded { return "任务库尚未就绪" }
-        return session?.cloudEnabled == true ? "使用系统 Apple 账户" : "尚未登录 iCloud"
-    }
-
-    func setCloudSyncEnabled(_ enabled: Bool) async {
-        guard StoreSession.supportsCloudSync, enabled != cloudSyncEnabled else { return }
-        cloudSyncEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "M0CloudSyncEnabled")
-        await start()
-    }
-
-    // Checking a healthy, unchanged account must not recreate its mirror or
-    // clear its event history. Account notifications take the blocking path.
-    func checkAccountAndStorage() async {
-        guard !starting, !checkingAccount else { return }
-        guard loaded, let session else { await start(); return }
-        guard StoreSession.supportsCloudSync, cloudSyncEnabled else { reload(); return }
-        let checkID = UUID()
-        accountCheckID = checkID
-        checkingAccount = true
-        defer { if accountCheckID == checkID { checkingAccount = false } }
-        do {
-            let account = try await StoreSession.confirmedAccount()
-            guard accountCheckID == checkID else { return }
-            let confirmed = try StoreSession.cloudSession(syncEnabled: true, accountHash: account)
-            if confirmed == session {
-                try store?.consumeHistory()
-                reload()
-            } else { await start(confirmedAccount: .success(account)) }
-        } catch {
-            guard accountCheckID == checkID else { return }
-            // Close the unconfirmed cloud library before falling back locally.
-            await start(confirmedAccount: .failure(error))
-        }
-    }
 
     func scheduled(on day: Day) -> [TaskSnapshot] {
         active.filter { $0.schedule.dayRange(in: .current)?.contains(day) == true }.sorted { lhs, rhs in
@@ -106,23 +54,11 @@ final class PrototypeModel: ObservableObject {
         }
     }
 
-    func start(confirmedAccount: Result<String?, Error>? = nil) async {
-        guard !starting else { restartRequested = true; return }
+    func start() async {
         let previousPath = storePath
         let previousSelection = selection
-        starting = true
-        accountCheckID = UUID()
-        checkingAccount = true
         capture.detach()
         reminders.attach(nil)
-        defer {
-            starting = false
-            checkingAccount = false
-            if restartRequested {
-                restartRequested = false
-                Task { await start() }
-            }
-        }
         completionFeedback = nil
         loaded = false
         tasks = []
@@ -130,38 +66,12 @@ final class PrototypeModel: ObservableObject {
         unreadableIDs = []
         selection = nil
         storePath = ""
-        session = nil
-        cloudAccountIssue = nil
-        cloudSyncStatus = CloudSyncStatus()
-        status = "正在检查账户与存储…"
-        if accountObserver == nil && !StoreSession.isLocalBuild && !StoreSession.isDesktopLocalBuild {
-            accountObserver = NotificationCenter.default.addObserver(forName: .CKAccountChanged,
-                                                                     object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in await self?.start() }
-            }
-        }
+        status = "正在打开任务库…"
         do {
             let blockedSession = StoreSession.isLocalBuild ? nil : try StoreSession.blockExtensions()
             try store?.close()
             store = nil
-            let session: StoreSession
-            do {
-                if StoreSession.supportsCloudSync, cloudSyncEnabled, let confirmedAccount {
-                    session = try StoreSession.cloudSession(syncEnabled: true, accountHash: confirmedAccount.get())
-                } else {
-                    session = try await StoreSession.forMainApp(blockedSession: blockedSession, cloudSyncEnabled: cloudSyncEnabled)
-                }
-                status = session.cloudEnabled ? "已本机保存；iCloud 由系统异步交换"
-                    : StoreSession.supportsCloudSync ? (cloudSyncEnabled ? "请在系统设置中登录 iCloud；当前使用本机任务库" : "本机任务库 · iCloud 同步已关闭")
-                    : StoreSession.isDesktopLocalBuild ? "桌面本机任务 · 未接入 iCloud" : "独立本地测试库 · 未接入 iCloud"
-            } catch {
-                if StoreSession.isDesktopLocalBuild { throw error }
-                session = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "local-inbox",
-                                       accountHash: nil, cloudEnabled: false, ready: false)
-                cloudAccountIssue = error.localizedDescription
-                status = "iCloud 身份待确认 · 使用独立本机任务库"
-            }
-            guard !restartRequested else { return }
+            let session = try StoreSession.forMainApp(blockedSession: blockedSession)
             let directory = try session.directory()
             if StoreSession.isMacDistributionBuild {
                 if let startedDistributionDirectory {
@@ -178,18 +88,10 @@ final class PrototypeModel: ObservableObject {
                     try LocalLibraryUpgrade.prepare(source: source, target: directory)
                 }
             }
-            let opened = try TaskStore(directory: directory, cloudID: session.cloudEnabled ? StoreSession.cloudID : nil,
-                                       session: StoreSession.isLocalBuild ? nil : session)
+            let opened = try TaskStore(directory: directory, session: StoreSession.isLocalBuild ? nil : session)
             opened.onChange = { [weak self] in self?.reload() }
-            opened.onSyncEvent = { [weak self, weak opened] text in
-                guard let self, let opened, self.store === opened else { return }
-                self.cloudSyncStatus = opened.syncStatus
-                self.status = text
-            }
+            opened.onHistoryReadFailure = { [weak self] in self?.status = "本机历史读取失败；本机数据保留" }
             store = opened
-            self.session = session
-            cloudSyncStatus = opened.syncStatus
-            if session.cloudEnabled { status = cloudSyncStatus.summary }
             storePath = directory.path
             if !StoreSession.isLocalBuild { try StoreSession.publish(session) }
             try opened.consumeHistory()
@@ -208,6 +110,7 @@ final class PrototypeModel: ObservableObject {
                let previousSelection, tasks.contains(where: { $0.id == previousSelection }) {
                 selection = previousSelection
             }
+            status = StoreSession.isLocalBuild ? "独立本地测试库" : "桌面本机任务"
             loaded = true
             capture.attach(to: opened, tasks: tasks, skipping: unreadableIDs)
             reminders.attach(opened)
@@ -221,7 +124,6 @@ final class PrototypeModel: ObservableObject {
             unreadableIDs = []
             selection = nil
             storePath = ""
-            self.session = nil
             if !StoreSession.isLocalBuild { try? StoreSession.blockExtensions() }
             self.error = "存储未打开：\(error.localizedDescription) 原库已保留。"
             status = "启动失败 · 没有删库重建"
@@ -254,7 +156,7 @@ final class PrototypeModel: ObservableObject {
                 } else {
                     taskToOpen = nil
                     selection = nil
-                    error = "没有找到这条任务。它可能已被删除，或还没有同步到这台设备。"
+                    error = "没有找到这条任务。请检查当前任务库。"
                 }
             }
             WidgetCenter.shared.reloadAllTimelines()

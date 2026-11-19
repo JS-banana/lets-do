@@ -265,7 +265,7 @@ final class WeekTaskOverviewTests: XCTestCase {
                                     isCompleted: false)
         let variants: [(String, [CalendarTask], String, ColorScheme)] = [
             ("week-medium-light", tasks, "", .light),
-            ("week-medium-dark-sync", tasks + [weekOnly], "本机完成 · 打开应用后同步", .dark),
+            ("week-medium-dark-unreadable", tasks + [weekOnly], "1 条任务暂不可读 · 打开应用查看", .dark),
             ("week-medium-multi-day", tasks + [weekOnly, spanning], "", .light)
         ]
         for (name, items, message, colorScheme) in variants {

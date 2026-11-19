@@ -28,5 +28,5 @@
     </BuildableProductRunnable>
   </ProfileAction>
   <AnalyzeAction buildConfiguration="Local" />
-  <ArchiveAction buildConfiguration="CloudDevelopment" revealArchiveInOrganizer="YES" />
+  <ArchiveAction buildConfiguration="MacDistribution" revealArchiveInOrganizer="YES" />
 </Scheme>

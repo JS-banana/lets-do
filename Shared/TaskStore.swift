@@ -1,4 +1,3 @@
-import CloudKit
 import CoreData
 import Darwin
 import Foundation
@@ -35,7 +34,7 @@ struct NoteRevision: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-// Drafts are device-local recovery material, outside the mirrored Core Data model.
+// Drafts are device-local recovery material, outside the Core Data model.
 struct LocalDraft: Codable, Equatable, Identifiable, Sendable {
     enum Kind: String, Codable, Sendable { case capture, editor }
     let formatVersion: Int
@@ -141,288 +140,19 @@ struct TaskArchive: Codable, Sendable {
     }
 }
 
-enum CloudSyncDirection: String, Equatable, Hashable, Sendable {
-    case `import`
-    case `export`
-    case setup
-
-    var label: String {
-        switch self {
-        case .import: "接收"
-        case .export: "发送"
-        case .setup: "连接"
-        }
-    }
-}
-
-enum CloudSyncFailure: String, Equatable, Sendable {
-    case network
-    case quota
-    case account
-    case permission
-    case rateLimited
-    case unknown
-
-    init(error: Error) {
-        var visited = Set<ObjectIdentifier>()
-        self = Self.resolve(error, depth: 0, visited: &visited)
-    }
-
-    private static let maxUnwrapDepth = 8
-    private static let maxPartialErrors = 32
-
-    private static func resolve(_ error: Error, depth: Int,
-                                visited: inout Set<ObjectIdentifier>) -> Self {
-        guard depth < maxUnwrapDepth else { return .unknown }
-        let nsError = error as NSError
-        guard visited.insert(ObjectIdentifier(nsError)).inserted else { return .unknown }
-
-        if nsError.domain == CKError.errorDomain,
-           let code = CKError.Code(rawValue: nsError.code) {
-            if code == .partialFailure {
-                return resolvePartial(nsError, depth: depth, visited: &visited)
-            }
-            if let direct = directMapping(for: code) { return direct }
-        }
-
-        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
-            return resolve(underlying, depth: depth + 1, visited: &visited)
-        }
-        return .unknown
-    }
-
-    private static func resolvePartial(_ error: NSError, depth: Int,
-                                       visited: inout Set<ObjectIdentifier>) -> Self {
-        let raw = error.userInfo[CKPartialErrorsByItemIDKey]
-        let values: [Any]
-        if let dictionary = raw as? NSDictionary {
-            values = Array(dictionary.allValues.prefix(maxPartialErrors))
-        } else if let dictionary = raw as? [AnyHashable: Any] {
-            values = Array(dictionary.values.prefix(maxPartialErrors))
-        } else {
-            values = []
-        }
-
-        var best: Self?
-        for value in values {
-            guard let nested = value as? Error else { continue }
-            let candidate = resolve(nested, depth: depth + 1, visited: &visited)
-            guard candidate != .unknown else { continue }
-            if best == nil || candidate.priority > best!.priority { best = candidate }
-        }
-        return best ?? .unknown
-    }
-
-    private static func directMapping(for code: CKError.Code) -> Self? {
-        switch code {
-        case .networkUnavailable, .networkFailure, .serviceUnavailable, .serverResponseLost, .zoneBusy:
-            .network
-        case .quotaExceeded:
-            .quota
-        case .notAuthenticated, .managedAccountRestricted, .accountTemporarilyUnavailable:
-            .account
-        case .permissionFailure, .missingEntitlement, .badContainer, .badDatabase:
-            .permission
-        case .requestRateLimited:
-            .rateLimited
-        default:
-            nil
-        }
-    }
-
-    private var priority: Int {
-        switch self {
-        case .quota: 5
-        case .network: 4
-        case .account: 3
-        case .permission: 2
-        case .rateLimited: 1
-        case .unknown: 0
-        }
-    }
-
-    var recoveryMessage: String {
-        switch self {
-        case .network:
-            "网络暂不可用，请检查网络连接后重试。"
-        case .quota:
-            "iCloud 存储空间不足，请清理空间后重试。"
-        case .account:
-            "iCloud 账户不可用，请登录正确账户后重试。"
-        case .permission:
-            "没有 iCloud 数据权限，请检查账户与应用权限后重试。"
-        case .rateLimited:
-            "iCloud 请求过于频繁，请稍后重试。"
-        case .unknown:
-            "暂时无法完成同步，原有数据已保留，请稍后重试。"
-        }
-    }
-}
-
-struct CloudSyncEvent: Equatable, Sendable {
-    let id: UUID
-    let direction: CloudSyncDirection
-    let startDate: Date
-    let endDate: Date?
-    let succeeded: Bool
-    let failure: CloudSyncFailure?
-
-    init(id: UUID, direction: CloudSyncDirection, startDate: Date,
-         endDate: Date? = nil, succeeded: Bool = false, failure: CloudSyncFailure? = nil) {
-        self.id = id
-        self.direction = direction
-        self.startDate = startDate
-        self.endDate = endDate
-        self.succeeded = succeeded
-        self.failure = failure
-    }
-}
-
-struct CloudSyncStatus: Equatable, Sendable {
-    private struct FailureState: Equatable, Sendable {
-        let occurredAt: Date
-        let kind: CloudSyncFailure
-    }
-
-    private struct DirectionState: Equatable, Sendable {
-        var lastSuccess: Date?
-        var failure: FailureState?
-    }
-
-    private struct EventState: Equatable, Sendable {
-        let direction: CloudSyncDirection
-        var endDate: Date?
-    }
-
-    // Keep terminal UUID tombstones: evicting one would let a late start
-    // notification for that event make the status busy again.
-    private var events: [UUID: EventState] = [:]
-    private var importState = DirectionState()
-    private var exportState = DirectionState()
-    private var setupState = DirectionState()
-
-    init() {}
-
-    var lastImport: Date? { importState.lastSuccess }
-    var lastExport: Date? { exportState.lastSuccess }
-
-    var failureMessage: String? {
-        let failures: [(CloudSyncDirection, FailureState)] = [
-            (.import, importState.failure),
-            (.export, exportState.failure),
-            (.setup, setupState.failure)
-        ].compactMap { direction, state in
-            state.map { (direction, $0) }
-        }
-        guard let latest = failures.max(by: { $0.1.occurredAt < $1.1.occurredAt }) else { return nil }
-        return "iCloud \(latest.0.label)失败：\(latest.1.kind.recoveryMessage)"
-    }
-
-    var summary: String {
-        let active = Set(events.values.compactMap { $0.endDate == nil ? $0.direction : nil })
-            .sorted { $0.rawValue < $1.rawValue }
-        if !active.isEmpty {
-            let running = active == [.setup] ? "正在连接 iCloud"
-                : "正在与 iCloud 交换数据（\(active.map(\.label).joined(separator: "、"))）"
-            if let failureMessage { return "\(running)；\(failureMessage)" }
-            return running
-        }
-        if let failureMessage { return failureMessage }
-
-        let completed: [String] = [
-            lastImport.map { _ in "接收" },
-            lastExport.map { _ in "发送" }
-        ].compactMap { $0 }
-        if !completed.isEmpty {
-            let exchange = completed.joined(separator: "和")
-            return "本机已完成 iCloud \(exchange)；不代表另一台设备已收到"
-        }
-        if setupState.lastSuccess != nil { return "iCloud 已连接，尚未交换任务数据" }
-        return "尚未同步"
-    }
-
-    mutating func apply(_ event: CloudSyncEvent) {
-        let isFinished = event.endDate != nil
-        if let previous = events[event.id] {
-            // A terminal event is final for its UUID. This also drops a queued
-            // start notification that arrives after close/reopen or after finish.
-            if previous.endDate != nil {
-                guard let previousEnd = previous.endDate, let incomingEnd = event.endDate,
-                      incomingEnd > previousEnd else { return }
-            }
-        }
-
-        let direction = events[event.id]?.direction ?? event.direction
-        events[event.id] = EventState(direction: direction, endDate: event.endDate)
-        if isFinished {
-            let occurredAt = event.endDate ?? event.startDate
-            if event.succeeded, event.failure == nil {
-                applySuccess(direction, at: occurredAt)
-            } else {
-                applyFailure(direction, at: occurredAt, kind: event.failure ?? .unknown)
-            }
-        } else if let failure = event.failure {
-            // Keep the event active until Core Data reports its end, but surface
-            // an error immediately if CloudKit supplies one on a running update.
-            applyFailure(direction, at: event.startDate, kind: failure)
-        }
-    }
-
-    private mutating func applySuccess(_ direction: CloudSyncDirection, at date: Date) {
-        switch direction {
-        case .import:
-            applySuccess(at: date, to: &importState)
-        case .export:
-            applySuccess(at: date, to: &exportState)
-        case .setup:
-            applySuccess(at: date, to: &setupState)
-        }
-    }
-
-    private func applySuccess(at date: Date, to state: inout DirectionState) {
-        if state.lastSuccess == nil || state.lastSuccess! < date { state.lastSuccess = date }
-        if (state.failure?.occurredAt ?? .distantPast) <= date { state.failure = nil }
-    }
-
-    private mutating func applyFailure(_ direction: CloudSyncDirection, at date: Date,
-                                       kind: CloudSyncFailure) {
-        switch direction {
-        case .import:
-            applyFailure(at: date, kind: kind, to: &importState)
-        case .export:
-            applyFailure(at: date, kind: kind, to: &exportState)
-        case .setup:
-            applyFailure(at: date, kind: kind, to: &setupState)
-        }
-    }
-
-    private func applyFailure(at date: Date, kind: CloudSyncFailure,
-                              to state: inout DirectionState) {
-        // An older callback must not overwrite a newer successful exchange.
-        if let lastSuccess = state.lastSuccess, lastSuccess > date { return }
-        if (state.failure?.occurredAt ?? .distantPast) <= date {
-            state.failure = FailureState(occurredAt: date, kind: kind)
-        }
-    }
-}
-
 // Main-queue contexts stay here. Views and intents receive only value snapshots/UUIDs.
 @MainActor
 final class TaskStore {
     private(set) var container: NSPersistentContainer?
     let directory: URL
     let isExtension: Bool
-    private let mirrored: Bool
     private let session: StoreSession?
     private var modelLease: StoreFileLock?
     private var observer: NSObjectProtocol?
-    private var eventObserver: NSObjectProtocol?
     private var token: NSPersistentHistoryToken?
     private var callbackGeneration = UUID()
     var onChange: (() -> Void)?
-    var onSyncEvent: ((String) -> Void)?
-    private(set) var syncStatus: CloudSyncStatus = .init()
-    private static var mirrorOwners = Set<URL>()
+    var onHistoryReadFailure: (() -> Void)?
     private static let logger = Logger(subsystem: "com.panion.todo.m0", category: "store")
 
     private var context: NSManagedObjectContext {
@@ -450,14 +180,10 @@ final class TaskStore {
         return trimmed == original.trimmingCharacters(in: .whitespacesAndNewlines) ? nil : trimmed
     }
 
-    init(directory: URL, cloudID: String? = nil, isExtension: Bool = false, session: StoreSession? = nil) throws {
+    init(directory: URL, isExtension: Bool = false, session: StoreSession? = nil) throws {
         self.directory = directory
         self.isExtension = isExtension
         self.session = session
-        mirrored = cloudID != nil
-        guard !(isExtension && mirrored) else {
-            throw PrototypeError.invalid("扩展不能持有 CloudKit 镜像。")
-        }
         guard let modelURL = Bundle.main.url(forResource: "Model", withExtension: "momd"),
               let model = NSManagedObjectModel(contentsOf: modelURL) else {
             throw PrototypeError.unavailable("未找到版本化数据模型。")
@@ -488,33 +214,17 @@ final class TaskStore {
             // No open app/extension may retain the old model while migration runs.
             try lease.changeMode(LOCK_EX)
         }
-        if mirrored {
-            guard Self.mirrorOwners.insert(directory).inserted else {
-                throw PrototypeError.unavailable("本进程已有同一存储的镜像实例。")
-            }
-        }
-        let persistent: NSPersistentContainer
-        if cloudID != nil {
-            persistent = NSPersistentCloudKitContainer(name: "Model", managedObjectModel: model)
-        } else {
-            persistent = NSPersistentContainer(name: "Model", managedObjectModel: model)
-        }
+        let persistent = NSPersistentContainer(name: "Model", managedObjectModel: model)
         let description = NSPersistentStoreDescription(url: storeURL)
         description.shouldAddStoreAsynchronously = false
         description.shouldMigrateStoreAutomatically = !isExtension
         description.shouldInferMappingModelAutomatically = !isExtension
         description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
         description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
-        if let cloudID {
-            let options = NSPersistentCloudKitContainerOptions(containerIdentifier: cloudID)
-            options.databaseScope = .private
-            description.cloudKitContainerOptions = options
-        }
         persistent.persistentStoreDescriptions = [description]
         var loadError: Error?
         persistent.loadPersistentStores { _, error in loadError = error }
         if let loadError {
-            if mirrored { Self.mirrorOwners.remove(directory) }
             throw loadError // Never delete/reset the original store after a loading error.
         }
         try lease.changeMode(LOCK_SH)
@@ -526,7 +236,7 @@ final class TaskStore {
         let tokenURL = directory.appendingPathComponent(isExtension ? "history-widget.token" : "history-app.token")
         if let data = try? Data(contentsOf: tokenURL) {
             // Invalid recovery material can be replayed from the start; it must
-            // not strand an already opened mirror or discard the database.
+            // not prevent opening the store or discard the database.
             token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSPersistentHistoryToken.self, from: data)
         }
         let observerGeneration = callbackGeneration
@@ -539,73 +249,18 @@ final class TaskStore {
                     return
                 }
                 do { try self.consumeHistory(); self.onChange?() }
-                catch { self.onSyncEvent?("本机历史读取失败；本机数据保留") }
+                catch { self.onHistoryReadFailure?() }
             }
         }
-        if mirrored {
-            eventObserver = NotificationCenter.default.addObserver(
-                forName: NSPersistentCloudKitContainer.eventChangedNotification, object: persistent, queue: .main
-            ) { [weak self] notification in
-                guard let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
-                        as? NSPersistentCloudKitContainer.Event else { return }
-                let direction: CloudSyncDirection
-                let name: String
-                switch event.type {
-                case .import:
-                    direction = .import
-                    name = "导入"
-                case .export:
-                    direction = .export
-                    name = "导出"
-                case .setup:
-                    direction = .setup
-                    name = "建立连接"
-                @unknown default:
-                    return
-                }
-                let eventID = event.identifier
-                let cloudEvent = CloudSyncEvent(
-                    id: eventID,
-                    direction: direction,
-                    startDate: event.startDate,
-                    endDate: event.endDate,
-                    succeeded: event.succeeded,
-                    failure: event.error.map { CloudSyncFailure(error: $0) }
-                )
-                let outcome: String
-                if let failure = cloudEvent.failure {
-                    outcome = "failure-\(failure.rawValue)"
-                } else if cloudEvent.endDate == nil {
-                    outcome = "running"
-                } else if cloudEvent.succeeded {
-                    outcome = "success"
-                } else {
-                    outcome = "failure-unknown"
-                }
-                Task { @MainActor [weak self] in
-                    guard let self,
-                          self.acceptsCallback(generation: observerGeneration, containerID: persistentID) else {
-                        return
-                    }
-                    self.record("cloud.\(name)", actionID: eventID, outcome: outcome)
-                    self.syncStatus.apply(cloudEvent)
-                    self.onSyncEvent?(self.syncStatus.summary)
-                    do { try self.consumeHistory(); self.onChange?() }
-                    catch { self.onSyncEvent?("历史读取失败；本机数据保留") }
-                }
-            }
-        }
-        record("store.open", outcome: mirrored ? "cloud-mirror" : isExtension ? "extension-local" : "local")
+        record("store.open", outcome: isExtension ? "extension-local" : "local")
     }
 
     func close() throws {
         callbackGeneration = UUID()
         if let observer { NotificationCenter.default.removeObserver(observer) }
-        if let eventObserver { NotificationCenter.default.removeObserver(eventObserver) }
         observer = nil
-        eventObserver = nil
         onChange = nil
-        onSyncEvent = nil
+        onHistoryReadFailure = nil
         guard let container else { return }
         container.viewContext.reset()
         for store in container.persistentStoreCoordinator.persistentStores {
@@ -613,7 +268,6 @@ final class TaskStore {
         }
         self.container = nil
         modelLease = nil
-        if mirrored { Self.mirrorOwners.remove(directory) }
     }
 
     private func matching(_ id: UUID) throws -> [NSManagedObject] {
@@ -628,11 +282,9 @@ final class TaskStore {
         let base = directory.deletingLastPathComponent()
         let lock = try StoreFileLock(url: base.appendingPathComponent("session.lock"), mode: LOCK_SH)
         let published = try StoreSession.readPublished(at: base)
-        let isolatedInbox = !session.ready && session.namespace == "local-inbox" && session.accountHash == nil
-        guard session.modelVersion == StoreSession.modelVersion,
-              directory.lastPathComponent == session.namespace,
-              isolatedInbox ? !published.ready : (session.ready && published == session) else {
-            throw PrototypeError.unavailable("账户或模型门禁已变化；没有访问旧库，请重新打开应用。")
+        guard session.ready, session.modelVersion == StoreSession.modelVersion,
+              directory.lastPathComponent == session.namespace, published == session else {
+            throw PrototypeError.unavailable("存储会话或模型已变化；没有访问旧库，请重新打开应用。")
         }
         return lock
     }
@@ -845,7 +497,7 @@ final class TaskStore {
               let body = note.value(forKey: "body") as? String,
               let createdAt = note.value(forKey: "createdAt") as? Date,
               let parents = note.value(forKey: "parentIDsJSON") as? String else {
-            throw PrototypeError.unavailable("正文记录字段尚不完整，等待同步；记录已保留。")
+            throw PrototypeError.unavailable("正文记录字段不完整，原记录已保留。")
         }
         guard body.utf8.count <= 1_000_000 else { throw PrototypeError.invalid("正文异常过大，原记录保留。") }
         return NoteRevision(id: id, taskID: taskID, body: body,
@@ -921,14 +573,14 @@ final class TaskStore {
         var groups: [UUID: [NSManagedObject]] = [:]
         for object in objects {
             guard let id = object.value(forKey: "id") as? UUID else {
-                try skip(PrototypeError.unavailable("任务身份尚未到达，等待同步；记录已保留。"), task: nil)
+                try skip(PrototypeError.unavailable("任务缺少标识，原记录已保留。"), task: nil)
                 continue
             }
             groups[id, default: []].append(object)
         }
         var results: [TaskSnapshot] = []
         for (id, group) in groups where !broken.contains(id) {
-            // CloudKit has no unique constraint. The record key gives all devices a stable projection.
+            // The record key provides a stable choice among physical duplicates.
             let object = group.sorted {
                 ($0.value(forKey: "recordKey") as? String ?? "") < ($1.value(forKey: "recordKey") as? String ?? "")
             }[0]
@@ -936,7 +588,7 @@ final class TaskStore {
                   let createdAt = object.value(forKey: "createdAt") as? Date,
                   let updatedAt = object.value(forKey: "updatedAt") as? Date,
                   let scheduleJSON = object.value(forKey: "scheduleJSON") as? String else {
-                try skip(PrototypeError.unavailable("任务字段尚不完整，等待同步；记录已保留。"), task: id)
+                try skip(PrototypeError.unavailable("任务字段不完整，原记录已保留。"), task: id)
                 continue
             }
             let schedule: TaskSchedule
@@ -948,7 +600,7 @@ final class TaskStore {
                                         schedule: schedule, currentRevisionID: object.value(forKey: "currentRevisionID") as? UUID,
                                         revisions: (revisionsByTask[id] ?? []).sorted { $0.id.uuidString < $1.id.uuidString }))
         }
-        // Report only tasks that exist; notes of a task still syncing are not a task to report.
+        // Report only tasks that exist; notes without a task do not constitute a task.
         let tasks = results.sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
         return ReadableTasks(tasks: tasks, unreadableIDs: broken.intersection(groups.keys), anonymousTasks: anonymous)
     }
@@ -963,7 +615,7 @@ final class TaskStore {
         let ids = Set(tasks.map(\.id))
         let notes = try context.fetch(NSFetchRequest<NSManagedObject>(entityName: "TaskNoteRevision"))
         guard notes.allSatisfy({ ($0.value(forKey: "taskID") as? UUID).map { ids.contains($0) } == true }) else {
-            throw PrototypeError.unavailable("部分正文的任务尚未同步到达，未导出不完整备份；记录仍保留。")
+            throw PrototypeError.unavailable("部分正文缺少对应任务，无法导出完整备份。原记录已保留。")
         }
         return TaskArchive(formatVersion: 1, modelVersion: StoreSession.modelVersion,
                            exportedAt: Date(), tasks: tasks)
@@ -1012,7 +664,7 @@ final class TaskStore {
     }
 
     func restoreIntoEmptyLocalStore(_ archive: TaskArchive) throws {
-        guard !mirrored, !isExtension else { throw PrototypeError.invalid("备份只能恢复到空的本机任务库；原有任务未改动。") }
+        guard !isExtension else { throw PrototypeError.invalid("备份只能恢复到空的本机任务库；原有任务未改动。") }
         let verified = try TaskArchive.decode(archive.encoded())
         try write("archive.restore", id: UUID()) { context in
             let request = NSFetchRequest<NSManagedObject>(entityName: "TaskItem")

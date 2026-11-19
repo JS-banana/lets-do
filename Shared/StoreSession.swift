@@ -1,10 +1,7 @@
-import CloudKit
-import CryptoKit
 import Darwin
 import Foundation
-import OSLog
 
-#if M0_DISTRIBUTION && (M0_LOCAL || M0_DESKTOP || M0_CLOUD)
+#if M0_DISTRIBUTION && (M0_LOCAL || M0_DESKTOP)
 #error("MacDistribution must not combine with another storage mode.")
 #endif
 
@@ -50,18 +47,12 @@ enum PrototypeError: LocalizedError {
 struct StoreSession: Codable, Equatable, Sendable {
     let modelVersion: Int
     let namespace: String
-    let accountHash: String?
-    let cloudEnabled: Bool
     let ready: Bool
 
     static let modelVersion = 2
 
     static var groupID: String {
         Bundle.main.object(forInfoDictionaryKey: "M0AppGroup") as? String ?? ""
-    }
-
-    static var cloudID: String {
-        Bundle.main.object(forInfoDictionaryKey: "M0CloudContainer") as? String ?? ""
     }
 
     static var isLocalBuild: Bool {
@@ -89,7 +80,6 @@ struct StoreSession: Codable, Equatable, Sendable {
         #endif
     }
 
-    static var supportsCloudSync: Bool { !isLocalBuild && !isDesktopLocalBuild }
 
     static func baseURL() throws -> URL {
         if isMacDistributionBuild {
@@ -112,7 +102,7 @@ struct StoreSession: Codable, Equatable, Sendable {
               let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) else {
             throw PrototypeError.unavailable("M0 App Group 不可用，请检查签名与权限。没有另建替代库。")
         }
-        return group.appendingPathComponent(isDesktopLocalBuild ? "TodoM0/DesktopLocal" : "TodoM0/Development", isDirectory: true)
+        return group.appendingPathComponent("TodoM0/DesktopLocal", isDirectory: true)
     }
 
     // Resolves one candidate location, without creating a container or claiming OS access to it.
@@ -147,8 +137,7 @@ struct StoreSession: Codable, Equatable, Sendable {
     }
 
     static func local() -> StoreSession {
-        StoreSession(modelVersion: modelVersion, namespace: "local-\(requestedRunName ?? "manual")",
-                     accountHash: nil, cloudEnabled: false, ready: true)
+        StoreSession(modelVersion: modelVersion, namespace: "local-\(requestedRunName ?? "manual")", ready: true)
     }
 
     private static var requestedRunName: String? {
@@ -173,7 +162,7 @@ struct StoreSession: Codable, Equatable, Sendable {
     // verified run name. An explicit automation run must never inspect manual.
     func legacyLocalDirectory(applicationSupport: URL, arguments: [String]) throws -> URL {
         let run = try Self.distributionRunName(arguments: arguments)
-        guard modelVersion == Self.modelVersion, accountHash == nil, !cloudEnabled,
+        guard modelVersion == Self.modelVersion,
               namespace.range(of: "^desktop-[A-Za-z0-9][A-Za-z0-9-]{0,69}\\z", options: .regularExpression) != nil,
               run == nil || namespace == "desktop-\(run!)", applicationSupport.isFileURL else {
             throw PrototypeError.invalid("无法确认旧版本任务库的对应名称；没有读取其他任务库。")
@@ -184,69 +173,6 @@ struct StoreSession: Codable, Equatable, Sendable {
         }
         return applicationSupport.appendingPathComponent("TodoM0/Local", isDirectory: true)
             .appendingPathComponent("local-" + name, isDirectory: true)
-    }
-
-    static func confirmedAccount() async throws -> String? {
-        guard !cloudID.isEmpty else { throw PrototypeError.unavailable("未配置 M0 CloudKit 容器。") }
-        let cloud = CKContainer(identifier: cloudID)
-        let logger = Logger(subsystem: "com.panion.todo.m0", category: "account")
-        let lookupID = UUID().uuidString
-        var phase = "account-status"
-        var started = ContinuousClock.now
-        // System log supplies time and PID; never include the account ID or hash.
-        func trace(_ outcome: String) {
-            let elapsed = started.duration(to: .now)
-            let ms = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1e15
-            logger.notice("account.lookup id=\(lookupID, privacy: .public) phase=\(phase, privacy: .public) outcome=\(outcome, privacy: .public) milliseconds=\(ms, privacy: .public)")
-        }
-        trace("begin")
-        do {
-            let status = try await cloud.accountStatus()
-            trace("status-\(status.rawValue)")
-            switch status {
-            case .available:
-                phase = "user-record-id"
-                started = .now
-                trace("begin")
-                let id = try await cloud.userRecordID()
-                trace("confirmed")
-                return SHA256.hash(data: Data(id.recordName.utf8)).map { String(format: "%02x", $0) }.joined()
-            case .noAccount: return nil
-            case .restricted:
-                throw PrototypeError.unavailable("此设备限制了 iCloud 访问。请在系统设置中检查账户限制；云库与草稿已保留。")
-            case .temporarilyUnavailable:
-                throw PrototypeError.unavailable("iCloud 暂时不可用，请稍后检查；云库与草稿已保留。")
-            default:
-                throw PrototypeError.unavailable("暂时无法确认 iCloud 账户，请检查系统设置与网络后重试；云库与草稿已保留。")
-            }
-        } catch {
-            trace("error-\((error as NSError).code)")
-            if error is PrototypeError { throw error }
-            if let cloudError = error as? CKError {
-                switch cloudError.code {
-                case .networkUnavailable, .networkFailure:
-                    throw PrototypeError.unavailable("无法连接 iCloud，请检查网络后重试；云库与草稿已保留。")
-                case .badContainer, .missingEntitlement, .permissionFailure:
-                    throw PrototypeError.unavailable("此版本尚未取得 iCloud 访问权限。请使用已配置云同步的版本；原有数据已保留。")
-                default: break
-                }
-            }
-            throw PrototypeError.unavailable("暂时无法确认 iCloud 账户，请稍后检查；云库与草稿已保留。")
-        }
-    }
-
-    // A local inbox never becomes a mirror. Switching modes selects a separate
-    // library, and returning to an account selects that account's existing one.
-    static func cloudSession(syncEnabled: Bool, accountHash: String?) throws -> StoreSession {
-        guard syncEnabled, let accountHash else {
-            return StoreSession(modelVersion: modelVersion, namespace: "local-inbox",
-                                accountHash: nil, cloudEnabled: false, ready: true)
-        }
-        guard accountHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
-            throw PrototypeError.invalid("无法确认 iCloud 账户标识；没有打开云库。")
-        }
-        return StoreSession(modelVersion: modelVersion, namespace: "account-\(accountHash)",
-                            accountHash: accountHash, cloudEnabled: true, ready: true)
     }
 
     static func publish(_ session: StoreSession) throws {
@@ -265,26 +191,21 @@ struct StoreSession: Codable, Equatable, Sendable {
 
     @discardableResult
     static func blockExtensions() throws -> StoreSession {
-        var namespace = "blocked"
-        if isDesktopLocalBuild {
-            let run = isMacDistributionBuild ? try distributionRunName(arguments: ProcessInfo.processInfo.arguments) : requestedRunName
-            let base = try baseURL()
-            let previous = FileManager.default.fileExists(atPath: base.appendingPathComponent("session.json").path)
-                ? try readPublished(at: base) : nil
-            namespace = try desktopNamespace(run: run, previous: previous)
-        }
-        let blocked = StoreSession(modelVersion: modelVersion, namespace: namespace, accountHash: nil,
-                                   cloudEnabled: false, ready: false)
+        let run = isMacDistributionBuild ? try distributionRunName(arguments: ProcessInfo.processInfo.arguments) : requestedRunName
+        let base = try baseURL()
+        let previous = FileManager.default.fileExists(atPath: base.appendingPathComponent("session.json").path)
+            ? try readPublished(at: base) : nil
+        let namespace = try desktopNamespace(run: run, previous: previous)
+        let blocked = StoreSession(modelVersion: modelVersion, namespace: namespace, ready: false)
         try publish(blocked)
         return blocked
     }
 
     // A cold Widget link has no launch arguments. Keep the last DesktopLocal
-    // library even while extensions are blocked; never infer a cloud library.
+    // library even while extensions are blocked.
     static func desktopNamespace(run: String?, previous: StoreSession?) throws -> String {
         if let previous {
-            guard (1...modelVersion).contains(previous.modelVersion), previous.accountHash == nil,
-                  !previous.cloudEnabled,
+            guard (1...modelVersion).contains(previous.modelVersion),
                   previous.namespace.range(of: "^desktop-[a-zA-Z0-9-]{1,70}$", options: .regularExpression) != nil else {
                 throw PrototypeError.unavailable("桌面任务库记录不兼容，原库与草稿已保留。")
             }
@@ -296,43 +217,26 @@ struct StoreSession: Codable, Equatable, Sendable {
         return namespace
     }
 
-    static func forMainApp(blockedSession: StoreSession?, cloudSyncEnabled: Bool) async throws -> StoreSession {
+    static func forMainApp(blockedSession: StoreSession?) throws -> StoreSession {
         if isLocalBuild { return local() }
-        if isDesktopLocalBuild {
-            guard let blockedSession, !blockedSession.ready, blockedSession.modelVersion == modelVersion else {
-                throw PrototypeError.unavailable("桌面任务库尚未完成本次启动检查。")
-            }
-            let namespace = try desktopNamespace(run: nil, previous: blockedSession)
-            return StoreSession(modelVersion: modelVersion, namespace: namespace,
-                                accountHash: nil, cloudEnabled: false, ready: true)
+        guard let blockedSession, !blockedSession.ready, blockedSession.modelVersion == modelVersion else {
+            throw PrototypeError.unavailable("桌面任务库尚未完成本次启动检查。")
         }
-        let account = cloudSyncEnabled ? try await confirmedAccount() : nil
-        return try cloudSession(syncEnabled: cloudSyncEnabled, accountHash: account)
+        let namespace = try desktopNamespace(run: nil, previous: blockedSession)
+        return StoreSession(modelVersion: modelVersion, namespace: namespace, ready: true)
     }
 
-    static func forExtension() async throws -> StoreSession {
+    static func forExtension() throws -> StoreSession {
         guard !isLocalBuild else {
-            throw PrototypeError.unavailable("请使用已签名的桌面本机版或 CloudDevelopment 添加系统小组件。")
+            throw PrototypeError.unavailable("请使用桌面本机版添加系统小组件。")
         }
         let base = try baseURL()
         let session = try readPublished(at: base)
         guard session.ready, session.modelVersion == modelVersion else {
-            throw PrototypeError.unavailable("请先打开主应用完成账户与模型检查。")
+            throw PrototypeError.unavailable("请先打开主应用完成存储与模型检查。")
         }
-        if isDesktopLocalBuild {
-            guard session.namespace.hasPrefix("desktop-"), session.accountHash == nil, !session.cloudEnabled,
-                  try readPublished(at: base) == session else {
-                throw PrototypeError.unavailable("桌面任务库已切换，请刷新小组件；没有访问其他任务库。")
-            }
-            _ = try session.directory()
-            return session
-        }
-        // Explicitly local sessions are safe without an online identity lookup.
-        // Cloud sessions still confirm the identity on every extension access.
-        let account = session.cloudEnabled ? try await confirmedAccount() : nil
-        guard try cloudSession(syncEnabled: session.cloudEnabled, accountHash: account) == session,
-              try readPublished(at: base) == session else {
-            throw PrototypeError.unavailable("iCloud 账户发生变化，请打开主应用；没有写入旧账户库。")
+        guard session.namespace.hasPrefix("desktop-"), try readPublished(at: base) == session else {
+            throw PrototypeError.unavailable("桌面任务库已切换，请刷新小组件；没有访问其他任务库。")
         }
         _ = try session.directory()
         return session

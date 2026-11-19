@@ -1,6 +1,5 @@
 M0_BUNDLE_PREFIX = com.panion.todo.m0
 M0_APP_GROUP = group.com.panion.todo.m0
-M0_CLOUD_CONTAINER = iCloud.com.panion.todo.m0
 M0_URL_SCHEME = todom0
 DEVELOPMENT_TEAM =
 #include? "Signing.local.xcconfig"
@@ -17,5 +16,4 @@ DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
 SWIFT_OPTIMIZATION_LEVEL = -Onone
 SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) DEBUG
 INFOPLIST_KEY_M0AppGroup = $(M0_APP_GROUP)
-INFOPLIST_KEY_M0CloudContainer = $(M0_CLOUD_CONTAINER)
 INFOPLIST_KEY_M0ModelVersion = 2

@@ -4,7 +4,7 @@
 
 v0.2.0 的 MacDistribution 包复用现有 Mac App、Widget targets 和 Core Data 模型，包含「今天的任务」「本周计划」「月历总览」。完成按钮提交明确的完成状态；任务、日期和「快速记」链接打开主应用相应入口。v0.1.1 的公开 Local 包只含主应用，是升级来源。
 
-公开主应用身份为 `com.panion.todo.m0.mac`，Widget 为对应的 `.widget`，URL scheme 为 `todom0`。MacDistribution 使用独立编译条件，主应用非沙盒，Widget 保留沙盒；无团队、Apple 证书、App Group 或云权限。Local、DesktopLocal 与 CloudDevelopment 保留各自数据和权限语义，见[开发配置](DEVELOPMENT.md#配置与-scheme)。
+公开主应用身份为 `com.panion.todo.m0.mac`，Widget 为对应的 `.widget`，URL scheme 为 `todom0`。MacDistribution 使用独立编译条件，主应用非沙盒，Widget 保留沙盒。Local 与 MacDistribution 的库路径和权限见[开发配置](DEVELOPMENT.md#配置与-scheme)。
 
 ## 应用内更新的进程与权限
 
@@ -16,7 +16,7 @@ ad hoc 签名没有 Team ID，Hardened Runtime 的默认库校验会拒绝加载
 
 唯一可修改的任务库位于 **Widget 自身 Application Support** 下的 `TodoM0/MacDistribution/<命名空间>/`。Widget 使用系统提供的自身目录；非沙盒主应用按固定 Widget 身份定位同一目录。角色、身份字段、路径及命名空间校验集中在 [StoreSession](../Shared/StoreSession.swift)，不维护多位置副本或另一份可写快照。
 
-[TaskStore](../Shared/TaskStore.swift) 统一处理主应用、Widget 和 Intent 的 Core Data 操作。主应用负责初始化与迁移，启动时先阻断扩展，关闭旧连接，准备并打开目标库，再发布就绪会话。扩展只访问已核验的现有库，不建库、不迁移、不持有 CloudKit 镜像。
+[TaskStore](../Shared/TaskStore.swift) 统一处理主应用、Widget 和 Intent 的 Core Data 操作。主应用负责初始化与迁移，启动时先阻断扩展，关闭旧连接，准备并打开目标库，再发布就绪会话。扩展只访问已核验的现有库，不建库、不迁移。
 
 共享会话限制命名空间和就绪状态；模型租约保护打开的模型，写锁串行化修改。旧时间线、已切换空间或启动失败不能绕过门禁写入其他库。正文使用不可变版本与父关系，删除使用 tombstone；完成动作设置目标状态，重复完成不会反转状态，但不等于请求去重。
 
@@ -55,7 +55,7 @@ macOS 的容器权限仍由系统决定。[Apple 的容器访问说明](https://
 | 用户日常安装 | 「应用程序」拖放、首次浏览器下载后的 Gatekeeper 授权、系统搜索界面由用户实际操作；本轮只核对独立副本的包元数据和 Spotlight 索引 |
 | 其他系统与硬件 | macOS 14 和 Intel 只有编译检查，没有运行验收 |
 | 容器拒绝授权 | 本轮没有出现授权提示，未验证拒绝与后续恢复 |
-| 其他验收 | iPhone、CloudKit、完整视觉／辅助功能／输入法矩阵及物理断电耐久性未测 |
+| 其他验收 | 完整视觉／辅助功能／输入法矩阵及物理断电耐久性未测 |
 
 公开按[发布说明](RELEASING.md)重新核对已验收 manifest 和既有草稿资产，不重建、重签或替换资产。后续版本须重新记录实际覆盖与未覆盖范围，不自动继承本次结果；刷新接口调用也不能代替真实时间线观察。
 

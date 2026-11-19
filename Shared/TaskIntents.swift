@@ -19,7 +19,7 @@ struct SetTaskCompletedIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         do {
             guard let id = UUID(uuidString: taskID) else { throw PrototypeError.invalid("无效的任务 UUID。") }
-            let session = try await StoreSession.forExtension()
+            let session = try StoreSession.forExtension()
             guard !namespace.isEmpty, session.namespace == namespace else {
                 throw PrototypeError.unavailable("任务库已变化，请刷新小组件后重试。")
             }
@@ -27,10 +27,9 @@ struct SetTaskCompletedIntent: AppIntent {
             defer { try? store.close() }
             let actionID = try store.setCompleted(id: id, completed: completed)
             store.record("intent.complete", id: id, actionID: actionID,
-                         outcome: session.cloudEnabled ? "local-committed-open-app-to-sync" : "desktop-local-committed")
+                         outcome: "desktop-local-committed")
             WidgetCenter.shared.reloadAllTimelines()
-            return .result(dialog: IntentDialog(stringLiteral: session.cloudEnabled
-                ? "已保存在此设备。打开 Let’s Do 后与 iCloud 交换。" : "已保存在这台设备。"))
+            return .result(dialog: "已保存在这台设备。")
         } catch {
             WidgetCenter.shared.reloadAllTimelines()
             return .result(dialog: IntentDialog(stringLiteral: "未完成：\(error.localizedDescription)"))

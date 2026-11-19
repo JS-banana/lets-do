@@ -404,7 +404,7 @@ struct PrototypeView: View {
                     Image(systemName: "gearshape").font(.system(size: 17)).frame(width: 24)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("设置").foregroundStyle(.primary)
-                        Text(StoreSession.isDesktopLocalBuild || StoreSession.isLocalBuild ? "本机存储" : "iCloud 与存储")
+                        Text("本机存储")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -783,7 +783,7 @@ struct PrototypeView: View {
             model.perform { store in document = try ArchiveDocument(data: store.archive().encoded()); exporting = true }
         }.disabled(!model.loaded)
         Button("从 JSON 备份恢复…", systemImage: "square.and.arrow.down") { importing = true }
-            .disabled(!model.loaded || model.session?.cloudEnabled == true)
+            .disabled(!model.loaded)
         if StoreSession.isLocalBuild {
             // Development builds only; release packages never offer fixture data.
             Button("载入固定测试数据", systemImage: "testtube.2") { model.seed() }
@@ -811,7 +811,7 @@ struct PrototypeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     VStack(alignment: .leading, spacing: 12) {
-                        if StoreSession.supportsCloudSync { cloudSettings } else { localStorageSettings }
+                        localStorageSettings
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
@@ -827,7 +827,7 @@ struct PrototypeView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("数据").font(.headline)
                         dataActions.buttonStyle(.borderless)
-                        Text("备份包含任务和已保存的正文版本，可能有私人内容，请妥善保管。恢复只支持空的本机任务库，不会合并或覆盖已有任务；iCloud 任务库不能恢复。")
+                        Text("备份包含任务和已保存的正文版本，可能有私人内容，请妥善保管。恢复只支持空的本机任务库，不会合并或覆盖已有任务。")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     Button("小组件布局预览", systemImage: "rectangle.3.group") { showingWidgets = true }
@@ -863,52 +863,13 @@ struct PrototypeView: View {
         if !model.loaded {
             Text(model.status).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
-        Button("检查本机存储") { Task { await model.checkAccountAndStorage() } }
-            .buttonStyle(.bordered).disabled(model.checkingAccount)
-            .accessibilityIdentifier("checkCloudAccount")
-    }
-
-    @ViewBuilder
-    private var cloudSettings: some View {
-        Label("iCloud 同步", systemImage: "icloud").font(.headline)
-        Toggle("使用 iCloud 同步", isOn: Binding(get: { model.cloudSyncEnabled }, set: { enabled in
-            TaskWritingEditor.finishEditing()
-            Task { await model.setCloudSyncEnabled(enabled) }
-        }))
-            .toggleStyle(.switch).disabled(model.checkingAccount)
-            .accessibilityIdentifier("cloudSyncToggle")
-        HStack(spacing: 8) {
-            if model.checkingAccount { ProgressView().controlSize(.small) }
-            Text(model.cloudAccountTitle).font(.callout.weight(.medium))
-        }.accessibilityIdentifier("cloudAccountStatus")
-        Text(model.cloudAccountIssue ?? model.status)
-            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        Text(model.cloudSyncEnabled
-             ? "关闭后回到本机任务库。iCloud 中的任务与草稿会保留，再次开启即可访问。"
-             : "开启后进入独立的 iCloud 任务库。已有本机任务与草稿保留在此设备，不会自动上传。")
-            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        Text("无需注册应用账号。Mac 与 iPhone 使用系统中同一个 Apple 账户，并在 iCloud 设置中允许 Let’s Do 访问。")
-            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        HStack {
-            Button("检查账户与同步") { Task { await model.checkAccountAndStorage() } }
-                .buttonStyle(.bordered).disabled(model.checkingAccount)
-                .accessibilityIdentifier("checkCloudAccount")
-            Button("打开系统设置") {
-                if !NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app")) {
-                    model.error = "无法打开系统设置。请从 Apple 菜单进入，再选择 Apple 账户 → iCloud。"
-                }
-            }.buttonStyle(.borderless)
+        Button("检查本机存储") {
+            Task {
+                if model.loaded { model.reload() } else { await model.start() }
+            }
         }
-        if model.session?.cloudEnabled == true {
-            DisclosureGroup("本次打开的同步详情") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("最近接收：\(model.cloudSyncStatus.lastImport.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "等待首次接收")")
-                    Text("最近发送：\(model.cloudSyncStatus.lastExport.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "等待首次发送")")
-                    Text("同步由系统安排。这些记录只表示此设备的交换，另一台设备是否收到仍需在那台设备查看。")
-                        .foregroundStyle(.secondary)
-                }.font(.caption).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-            }.font(.callout)
-        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("checkLocalStorage")
     }
 
     @ViewBuilder
@@ -934,12 +895,6 @@ struct PrototypeView: View {
         dismissWindow(id: "capture")
         model.selection = nil
         captureSession.mainWindowID = mainWindowID
-    }
-
-    private func saveCapture() {
-        if captureSession.save(using: model) {
-            search = ""
-        }
     }
 
     private func openURL(_ url: URL) {

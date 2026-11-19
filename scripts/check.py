@@ -13,7 +13,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument("check", choices=["build", "unit", "cloud-build", "desktop-build", "desktop-compile", "distribution-build"])
+parser.add_argument("check", choices=["build", "unit", "desktop-build", "desktop-compile", "distribution-build"])
 args = parser.parse_args()
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 output = ROOT / ".build" / "checks" / f"{stamp}-{args.check}"
@@ -21,7 +21,7 @@ output.mkdir(parents=True, exist_ok=False)
 base = ["xcodebuild", "-project", "Todo.xcodeproj", "-jobs", "4"]
 configuration = ("MacDistribution" if args.check == "distribution-build" else
                  "DesktopLocal" if args.check in ("desktop-build", "desktop-compile") else
-                 "CloudDevelopment" if args.check == "cloud-build" else "Local")
+                 "Local")
 
 
 def parse_test_summary(log_path):
@@ -102,10 +102,8 @@ elif args.check in ("desktop-build", "desktop-compile"):
     jobs = [("mac-desktop-build", "TodoM0Desktop", "platform=macOS,arch=" + platform.machine(), ["build"])]
     if args.check == "desktop-compile":
         jobs[0][3].append("CODE_SIGNING_ALLOWED=NO")
-elif args.check in ("build", "cloud-build"):
+elif args.check == "build":
     jobs = [("mac-build", "TodoM0Mac", "platform=macOS,arch=" + platform.machine(), ["build"])]
-    if args.check == "cloud-build":
-        jobs[0][3].append("CODE_SIGNING_ALLOWED=NO")
 else:
     target = "TodoM0Tests"
     jobs = [(args.check, "TodoM0Mac", "platform=macOS,arch=" + platform.machine(), ["test", f"-only-testing:{target}",
@@ -181,7 +179,7 @@ report = {"timestamp": stamp, "kind": args.check, "configuration": configuration
           "acceptanceBoundary": {
               "automatedChecks": automated_checks,
               "macGUI": "Real Mac GUI checks are recorded separately and are outside this script.",
-              "pending": ["system Widget runtime", "CloudKit"],
+              "pending": ["system Widget runtime"],
               "sourceStability": "Stable-source acceptance requires sourceChangedDuringCheck to be empty."}}
 report_path = output / "report.json"
 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
