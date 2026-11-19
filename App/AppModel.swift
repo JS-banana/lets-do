@@ -25,8 +25,19 @@ final class AppModel: ObservableObject {
     let capture = CaptureDraft()
     let reminders = MacReminders()
     private var reminderChanges: AnyCancellable?
+    private let localChanges = PassthroughSubject<Void, Never>()
+    private var localReminderChanges: AnyCancellable?
+    private var lastReminderDigest: Int?
 
     init() {
+        localReminderChanges = localChanges
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .sink { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.reminders.autoSync else { return }
+                    await self.reminders.refreshIfConnected()
+                }
+            }
         reminderChanges = NotificationCenter.default.publisher(for: .EKEventStoreChanged)
             .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
             .sink { [weak self] _ in
@@ -58,6 +69,7 @@ final class AppModel: ObservableObject {
         let previousSelection = selection
         capture.detach()
         reminders.attach(nil)
+        lastReminderDigest = nil
         completionFeedback = nil
         loaded = false
         tasks = []
@@ -122,6 +134,25 @@ final class AppModel: ObservableObject {
             guard let store else { return }
             let read = try store.readableSnapshots()
             tasks = read.tasks
+            var digest = Hasher()
+            for task in tasks {
+                digest.combine(task.id)
+                digest.combine(task.title)
+                digest.combine(task.isCompleted)
+                digest.combine(task.deletedAt != nil)
+                switch task.schedule {
+                case .none: digest.combine(0)
+                case let .week(start): digest.combine(1); digest.combine(start)
+                case let .allDay(start, end): digest.combine(2); digest.combine(start); digest.combine(end)
+                case let .timed(start, end, zone):
+                    digest.combine(3); digest.combine(start); digest.combine(end); digest.combine(zone)
+                }
+            }
+            let nextDigest = digest.finalize()
+            if lastReminderDigest != nextDigest {
+                lastReminderDigest = nextDigest
+                localChanges.send()
+            }
             unreadableTasks = read.unreadableCount
             unreadableIDs = read.unreadableIDs
             if let id = taskToOpen {
