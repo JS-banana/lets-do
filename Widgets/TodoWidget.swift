@@ -22,7 +22,7 @@ struct TaskProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<TaskEntry>) -> Void) {
         Task { @MainActor in
             do {
-                let session = try await StoreSession.forExtension()
+                let session = try StoreSession.forExtension()
                 let store = try TaskStore(directory: session.directory(), isExtension: true, session: session)
                 defer { try? store.close() }
                 let read = try store.readableSnapshots()
@@ -39,8 +39,7 @@ struct TaskProvider: TimelineProvider {
                 let entries = dates.map {
                     // Skipped tasks must not read as an empty day.
                     TaskEntry(date: $0, tasks: tasks, namespace: session.namespace,
-                              message: read.unreadableCount > 0 ? "\(read.unreadableCount) 条任务暂不可读 · 打开应用查看"
-                                  : session.cloudEnabled ? "本机完成 · 打开应用后同步" : "")
+                              message: read.unreadableCount > 0 ? "\(read.unreadableCount) 条任务暂不可读 · 打开应用查看" : "")
                 }
                 completion(Timeline(entries: entries, policy: .atEnd))
             } catch {
@@ -80,11 +79,7 @@ struct WeekPlanWidget: Widget {
             .configurationDisplayName("本周计划")
             .description("查看周一至周日的安排和本周尚未完成的任务，点击日期打开当天清单。")
             .contentMarginsDisabled()
-            #if os(macOS)
             .supportedFamilies([.systemMedium, .systemLarge, .systemExtraLarge])
-            #else
-            .supportedFamilies([.systemLarge])
-            #endif
     }
 }
 
@@ -94,11 +89,7 @@ struct MonthPlanWidget: Widget {
             .configurationDisplayName("月历总览")
             .description("查看整月的任务分布，点击日期继续安排。")
             .contentMarginsDisabled()
-            #if os(macOS)
             .supportedFamilies([.systemLarge, .systemExtraLarge])
-            #else
-            .supportedFamilies([.systemLarge])
-            #endif
     }
 }
 

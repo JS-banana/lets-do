@@ -9,7 +9,7 @@
 | 1 · 手机记录，Mac 安排 | 待办 → 从提醒事项导入 → 授权 → 选清单 → 导入 | 导入一条才创建一个本机任务。再次打开、刷新或重试均只出现一个 UUID |
 | 2 · 指定任务发到手机 | 任务详情 → 更多 → 发送到提醒事项；在 iPhone 的同一清单里勾选完成 | Mac 在该条关联上读取到完成后，只将原任务的完成状态设为真 |
 
-Let’s Do 的任务、周计划、版本、草稿和回收站继续由 TaskStore 管理。系统负责把 iCloud 清单的提醒事项送到另一台设备，两端有可能在不同时刻才看到变化。用户无需安装 iPhone 版 Let’s Do。原生 iOS 源码和 CloudKit 开发配置仍有独立的目标和验收要求。
+Let’s Do 的任务、周计划、版本、草稿和回收站继续由 TaskStore 管理。系统负责把 iCloud 清单的提醒事项送到另一台设备，两端有可能在不同时刻才看到变化。
 
 ## 数据映射与失败处理
 
@@ -42,13 +42,13 @@ Mac 主应用在启动、回到前台和收到 `EKEventStoreChanged` 时重新�
 
 ## 代码、权限和签名
 
-Mac 主应用中的 [MacReminders](../App/MacReminders.swift) 封装 EventKit、选择和关联。主窗口随任务库绑定／解绑，Widget 只读取既有任务库。Mac 的四种主应用配置声明 `NSRemindersFullAccessUsageDescription`。用户主动点击授权时才请求提醒事项完整访问；系统没有只读提醒事项授权档位。清单不可用时需重新选择，拒绝后可到「隐私与安全性 → 提醒事项」恢复权限。[EventKit 授权](https://developer.apple.com/documentation/eventkit/accessing-the-event-store)
+Mac 主应用中的 [MacReminders](../App/MacReminders.swift) 封装 EventKit、选择和关联。主窗口随任务库绑定／解绑，Widget 只读取既有任务库。Local 和 MacDistribution 主应用均声明 `NSRemindersFullAccessUsageDescription`。用户主动点击授权时才请求提醒事项完整访问；系统没有只读提醒事项授权档位。清单不可用时需重新选择，拒绝后可到「隐私与安全性 → 提醒事项」恢复权限。[EventKit 授权](https://developer.apple.com/documentation/eventkit/accessing-the-event-store)
 
-分发脚本给最终主应用签入 `com.apple.security.personal-information.calendars`，校验用途文案、主程序和 Widget 各自的签名权限。这个名称涵盖 EventKit 资源，应用只请求提醒事项。该路径使用用户系统账户中的清单，MacDistribution 无需自建 CloudKit 容器或付费团队。ad hoc 签名和系统隐私授权属于不同环节，重新构建后需实际测试授权能否延续。[Hardened Runtime](https://developer.apple.com/documentation/xcode/configuring-the-hardened-runtime) · [代码签名身份](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
+分发脚本给最终主应用签入 `com.apple.security.personal-information.calendars`，校验用途文案、主程序和 Widget 各自的签名权限。这个名称涵盖 EventKit 资源，应用只请求提醒事项。清单来自用户的系统账户。ad hoc 签名和系统隐私授权属于不同环节，重新构建后需实际测试授权能否延续。[Hardened Runtime](https://developer.apple.com/documentation/xcode/configuring-the-hardened-runtime) · [代码签名身份](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
 
 ## 验收步骤
 
-自动检查使用隔离的临时任务库和可控提醒事项来源。[提醒事项测试](../Tests/MacRemindersTests.swift)覆盖导入、重试、标识变化、切库、写锁失败后编辑再重试，以及完成回收中断后的重开保护；[存储测试](../Tests/TaskStoreTests.swift)覆盖操作凭据跨实例、历史消费和重启后的幂等性。运行 `python3 scripts/check.py unit` 和[开发说明](DEVELOPMENT.md#检查与构建)中的各配置编译，再用 `python3 scripts/package-mac.py` 检查最终 Mac 包。原生授权弹窗、系统提醒事项和跨设备传播需单独验证。
+自动检查使用隔离的临时任务库和可控提醒事项来源。[提醒事项测试](../Tests/MacRemindersTests.swift)覆盖导入、重试、标识变化、切库、写锁失败后编辑再重试，以及完成回收中断后的重开保护；[存储测试](../Tests/TaskStoreTests.swift)覆盖操作凭据跨实例、历史消费和重启后的幂等性。运行 [Mac 单元测试](DEVELOPMENT.md#检查与构建)，再按[本机打包说明](RELEASING.md#本机打包与留证)检查最终 Mac 包。原生授权弹窗、系统提醒事项和跨设备传播需单独验证。
 
 用测试清单、同一个候选安装包及 SHA-256 记录结果。下列项目待真机验收：
 

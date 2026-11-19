@@ -7,10 +7,8 @@ struct MonthView: View {
     let create: (Day) -> Void
     let inspectDay: (Day) -> Void
     @State private var draggingTaskID: UUID?
-    #if os(macOS)
     @State private var hoveredDay: Day?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    #endif
 
     private var month: Day { Self.monthContaining(selectedDay) }
 
@@ -29,11 +27,7 @@ struct MonthView: View {
     }
 
     private var visibleMonthLanes: Int {
-        #if os(macOS)
         2
-        #else
-        3
-        #endif
     }
 
     private var today: Day {
@@ -42,11 +36,7 @@ struct MonthView: View {
 
     var body: some View {
         Group {
-        #if os(macOS)
         macBody
-        #else
-        phoneBody
-        #endif
         }
     }
 
@@ -64,7 +54,6 @@ struct MonthView: View {
         .accessibilityLabel("星期一至星期日")
     }
 
-    #if os(macOS)
     private var macBody: some View {
         let currentLayout = layout
         return VStack(spacing: 0) {
@@ -283,87 +272,6 @@ struct MonthView: View {
         if inside { hoveredDay = day }
         else if hoveredDay == day { hoveredDay = nil }
     }
-
-    #endif
-
-    #if os(iOS)
-    private var phoneBody: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                weekdayHeader
-
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: 0), count: 7),
-                    spacing: 0
-                ) {
-                    ForEach(layout.days) { day in
-                        phoneDayCell(day)
-                    }
-                }
-                .background(AppStyle.surface(colorScheme), in: RoundedRectangle(cornerRadius: 16))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color.secondary.opacity(0.15), lineWidth: 0.5) }
-
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .padding(.bottom, 88)
-        }
-        .background(AppStyle.canvas(colorScheme).ignoresSafeArea())
-        .simultaneousGesture(DragGesture(minimumDistance: 40).onEnded { value in
-            if abs(value.translation.width) > abs(value.translation.height) * 1.5 {
-                shiftMonth(value.translation.width < 0 ? 1 : -1)
-            }
-        })
-        .accessibilityIdentifier("monthCalendar")
-    }
-
-    private func phoneDayCell(_ day: Day) -> some View {
-        let isCurrentMonth = String(day.rawValue.prefix(7)) == String(month.rawValue.prefix(7))
-        let isSelected = day == selectedDay
-        let isToday = day == today
-        let dayTasks = tasks(on: day)
-        let hasTasks = !dayTasks.isEmpty
-
-        return Button {
-            selectedDay = day
-            inspectDay(day)
-        } label: {
-            VStack(spacing: 2) {
-                Text(String(Int(day.rawValue.suffix(2))!))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isSelected ? Color.white : (isCurrentMonth ? Color.primary : Color.secondary))
-                    .frame(width: 30, height: 30)
-                    .background {
-                        if isSelected {
-                            Circle().fill(AppStyle.accent)
-                        } else if isToday {
-                            Circle().stroke(AppStyle.accentText(colorScheme), lineWidth: 1.5)
-                        }
-                    }
-
-                HStack(spacing: 3) {
-                    ForEach(Array(dayTasks.prefix(3))) { task in
-                        Circle().fill(task.isCompleted ? Color.secondary : AppStyle.scheduleAccent(task.schedule))
-                            .frame(width: 4, height: 4)
-                    }
-                }.frame(height: 5).accessibilityHidden(true)
-            }
-            .frame(maxWidth: .infinity, minHeight: 46)
-            .background(isSelected ? AppStyle.accent.opacity(0.04) : Color.clear)
-            .overlay { Rectangle().stroke(Color.secondary.opacity(0.12), lineWidth: 0.5) }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(hasTasks ? "查看当天任务" : "选择这一天")
-        .opacity(isCurrentMonth ? 1 : 0.42)
-        .accessibilityLabel(dayAccessibilityLabel(day, isToday: isToday, isSelected: isSelected))
-        .accessibilityValue("\(dayTasks.count)项，\(dayTasks.filter { !$0.isCompleted }.count)项未完成")
-        .accessibilityHint(hasTasks ? "查看当天任务" : "选择这一天")
-        .accessibilityIdentifier("day-\(day.rawValue)")
-    }
-
-    #endif
 
     private func tasks(on day: Day) -> [TaskSnapshot] {
         model.scheduled(on: day)

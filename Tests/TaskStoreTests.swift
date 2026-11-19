@@ -1,146 +1,9 @@
-import CloudKit
 import CoreData
 import Darwin
 import XCTest
 @testable import TodoM0
 
 final class TaskStoreTests: XCTestCase {
-    func testCloudSyncStatusKeepsOverlappingDirectionsIndependent() {
-        let start = Date(timeIntervalSince1970: 100)
-        let exportEnd = Date(timeIntervalSince1970: 120)
-        let importEnd = Date(timeIntervalSince1970: 130)
-        let importID = UUID()
-        let exportID = UUID()
-        var status = CloudSyncStatus()
-
-        status.apply(.init(id: importID, direction: .import, startDate: start))
-        status.apply(.init(id: exportID, direction: .export, startDate: start))
-        XCTAssertTrue(status.summary.contains("接收"))
-        XCTAssertTrue(status.summary.contains("发送"))
-
-        status.apply(.init(id: exportID, direction: .export, startDate: start,
-                           endDate: exportEnd, succeeded: true))
-        XCTAssertEqual(status.lastExport, exportEnd)
-        XCTAssertNil(status.lastImport)
-        XCTAssertTrue(status.summary.contains("正在与 iCloud 交换数据（接收）"))
-
-        status.apply(.init(id: importID, direction: .import, startDate: start,
-                           endDate: importEnd, succeeded: true))
-        XCTAssertEqual(status.lastImport, importEnd)
-        XCTAssertTrue(status.summary.contains("接收"))
-        XCTAssertTrue(status.summary.contains("发送"))
-        XCTAssertTrue(status.summary.contains("不代表另一台设备已收到"))
-    }
-
-    func testCloudSyncStatusPreservesDirectionFailureUntilThatDirectionSucceeds() {
-        let start = Date(timeIntervalSince1970: 200)
-        let failureEnd = Date(timeIntervalSince1970: 210)
-        let exportEnd = Date(timeIntervalSince1970: 220)
-        let retryStart = Date(timeIntervalSince1970: 230)
-        let retryEnd = Date(timeIntervalSince1970: 240)
-        var status = CloudSyncStatus()
-        let importID = UUID()
-
-        status.apply(.init(id: importID, direction: .import, startDate: start,
-                           endDate: failureEnd, failure: .network))
-        XCTAssertTrue(status.failureMessage?.contains("iCloud 接收失败") == true)
-
-        status.apply(.init(id: UUID(), direction: .export, startDate: start,
-                           endDate: exportEnd, succeeded: true))
-        XCTAssertTrue(status.failureMessage?.contains("iCloud 接收失败") == true)
-
-        status.apply(.init(id: UUID(), direction: .export, startDate: retryStart))
-        status.apply(.init(id: UUID(), direction: .import, startDate: retryStart))
-        XCTAssertTrue(status.failureMessage?.contains("iCloud 接收失败") == true)
-
-        status.apply(.init(id: importID, direction: .import, startDate: start,
-                           endDate: retryEnd, succeeded: true))
-        XCTAssertNil(status.failureMessage)
-    }
-
-    func testCloudSyncStatusDoesNotTreatSetupOrErrorlessFailureAsDataSuccess() {
-        let start = Date(timeIntervalSince1970: 300)
-        var status = CloudSyncStatus()
-        let setupID = UUID()
-
-        status.apply(.init(id: setupID, direction: .setup, startDate: start))
-        XCTAssertTrue(status.summary.contains("正在连接"))
-        status.apply(.init(id: setupID, direction: .setup, startDate: start,
-                           endDate: start.addingTimeInterval(1), succeeded: true))
-        XCTAssertNil(status.lastImport)
-        XCTAssertNil(status.lastExport)
-        XCTAssertTrue(status.summary.contains("尚未交换任务数据"))
-
-        status.apply(.init(id: UUID(), direction: .import, startDate: start,
-                           endDate: start.addingTimeInterval(2), succeeded: false))
-        XCTAssertNil(status.lastImport)
-        XCTAssertTrue(status.failureMessage?.contains("暂时无法完成同步") == true)
-        XCTAssertFalse(status.failureMessage?.contains("CKErrorDomain") == true)
-    }
-
-    func testCloudSyncStatusKeepsTimesMonotonicAndIgnoresLateEventUpdate() {
-        let older = Date(timeIntervalSince1970: 400)
-        let newer = Date(timeIntervalSince1970: 420)
-        var status = CloudSyncStatus()
-        let firstID = UUID()
-
-        status.apply(.init(id: firstID, direction: .import, startDate: older,
-                           endDate: newer, succeeded: true))
-        // A queued start notification for a finished event must not make the
-        // status busy again.
-        status.apply(.init(id: firstID, direction: .import, startDate: newer))
-        XCTAssertEqual(status.lastImport, newer)
-        XCTAssertFalse(status.summary.contains("正在与 iCloud 交换数据"))
-
-        status.apply(.init(id: UUID(), direction: .import, startDate: older,
-                           endDate: older.addingTimeInterval(1), succeeded: true))
-        XCTAssertEqual(status.lastImport, newer)
-        status.apply(.init(id: UUID(), direction: .import, startDate: newer,
-                           endDate: newer.addingTimeInterval(1), failure: .quota))
-        XCTAssertTrue(status.failureMessage?.contains("存储空间不足") == true)
-        status.apply(.init(id: UUID(), direction: .import, startDate: newer,
-                           endDate: newer.addingTimeInterval(2), succeeded: true))
-        XCTAssertNil(status.failureMessage)
-    }
-
-    func testCloudSyncFailureMapsCloudKitCategoriesWithoutRawErrorDetails() {
-        XCTAssertEqual(CloudSyncFailure(error: NSError(
-            domain: CKError.errorDomain, code: CKError.Code.networkUnavailable.rawValue)), .network)
-        XCTAssertEqual(CloudSyncFailure(error: NSError(
-            domain: CKError.errorDomain, code: CKError.Code.quotaExceeded.rawValue)), .quota)
-        XCTAssertEqual(CloudSyncFailure(error: NSError(
-            domain: CKError.errorDomain, code: CKError.Code.notAuthenticated.rawValue)), .account)
-        XCTAssertEqual(CloudSyncFailure(error: NSError(
-            domain: CKError.errorDomain, code: CKError.Code.permissionFailure.rawValue)), .permission)
-        XCTAssertEqual(CloudSyncFailure(error: NSError(
-            domain: CKError.errorDomain, code: CKError.Code.requestRateLimited.rawValue)), .rateLimited)
-        XCTAssertEqual(CloudSyncFailure(error: NSError(domain: "Other", code: 42)), .unknown)
-    }
-
-    func testCloudSyncFailureUnwrapsCoreDataAndPartialCloudKitErrors() {
-        let quota = NSError(domain: CKError.errorDomain, code: CKError.Code.quotaExceeded.rawValue)
-        let network = NSError(domain: CKError.errorDomain, code: CKError.Code.networkFailure.rawValue)
-        let wrappedQuota = NSError(domain: NSCocoaErrorDomain, code: 134000,
-                                   userInfo: [NSUnderlyingErrorKey: quota])
-        let wrappedNetwork = NSError(domain: NSCocoaErrorDomain, code: 134001,
-                                     userInfo: [NSUnderlyingErrorKey: network])
-        let partial = NSError(
-            domain: CKError.errorDomain,
-            code: CKError.Code.partialFailure.rawValue,
-            userInfo: [CKPartialErrorsByItemIDKey: ["task": quota] as NSDictionary]
-        )
-        let unknown = NSError(
-            domain: NSCocoaErrorDomain,
-            code: 134002,
-            userInfo: [NSUnderlyingErrorKey: NSError(domain: "Other", code: 42)]
-        )
-
-        XCTAssertEqual(CloudSyncFailure(error: wrappedQuota), .quota)
-        XCTAssertEqual(CloudSyncFailure(error: wrappedNetwork), .network)
-        XCTAssertEqual(CloudSyncFailure(error: partial), .quota)
-        XCTAssertEqual(CloudSyncFailure(error: unknown), .unknown)
-    }
-
     @MainActor
     func testWeeklyPlanSurvivesDraftRestartArchiveAndDateAssignment() throws {
         try withStore { store in
@@ -712,7 +575,7 @@ final class TaskStoreTests: XCTestCase {
             XCTAssertTrue(try XCTUnwrap(app.snapshots().first).isCompleted)
             XCTAssertTrue(FileManager.default.fileExists(atPath: app.directory.appendingPathComponent("history-widget.token").path))
             XCTAssertTrue(FileManager.default.fileExists(atPath: app.directory.appendingPathComponent("history-app.token").path))
-            XCTAssertFalse(widget.container is NSPersistentCloudKitContainer)
+            XCTAssertTrue(type(of: try XCTUnwrap(widget.container)) == NSPersistentContainer.self)
         }
     }
 
@@ -924,31 +787,29 @@ final class TaskStoreTests: XCTestCase {
     }
 
     func testNamespaceRejectsTraversalAndUnsupportedModelVersion() {
-        XCTAssertThrowsError(try StoreSession(modelVersion: StoreSession.modelVersion, namespace: "../other", accountHash: nil, cloudEnabled: false, ready: true).directory())
-        XCTAssertThrowsError(try StoreSession(modelVersion: 99, namespace: "local-test", accountHash: nil, cloudEnabled: false, ready: true).directory())
+        XCTAssertThrowsError(try StoreSession(modelVersion: StoreSession.modelVersion, namespace: "../other", ready: true).directory())
+        XCTAssertThrowsError(try StoreSession(modelVersion: 99, namespace: "local-test", ready: true).directory())
     }
 
-    func testDesktopColdLaunchKeepsLibraryAndRejectsInvalidPublishedSelection() throws {
-        let previous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-capture-a",
-                                    accountHash: nil, cloudEnabled: false, ready: false)
-        XCTAssertEqual(try StoreSession.desktopNamespace(run: nil, previous: nil), "desktop-manual")
-        XCTAssertEqual(try StoreSession.desktopNamespace(run: nil, previous: previous), previous.namespace)
-        XCTAssertEqual(try StoreSession.desktopNamespace(run: "capture-b", previous: previous), "desktop-capture-b")
-        XCTAssertThrowsError(try StoreSession.desktopNamespace(run: "../other", previous: nil))
+    func testDistributionColdLaunchKeepsLibraryAndRejectsInvalidPublishedSelection() throws {
+        let previous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-capture-a", ready: false)
+        XCTAssertEqual(try StoreSession.distributionNamespace(run: nil, previous: nil), "dist-manual")
+        XCTAssertEqual(try StoreSession.distributionNamespace(run: nil, previous: previous), previous.namespace)
+        XCTAssertEqual(try StoreSession.distributionNamespace(run: "capture-b", previous: previous), "dist-capture-b")
+        XCTAssertThrowsError(try StoreSession.distributionNamespace(run: "../other", previous: nil))
         let invalid = [
-            StoreSession(modelVersion: 99, namespace: previous.namespace, accountHash: nil, cloudEnabled: false, ready: true),
-            StoreSession(modelVersion: 2, namespace: "local-manual", accountHash: nil, cloudEnabled: false, ready: true),
-            StoreSession(modelVersion: 2, namespace: "desktop-../other", accountHash: nil, cloudEnabled: false, ready: true),
-            StoreSession(modelVersion: 2, namespace: previous.namespace, accountHash: "fixture", cloudEnabled: false, ready: true),
-            StoreSession(modelVersion: 2, namespace: previous.namespace, accountHash: nil, cloudEnabled: true, ready: true)
+            StoreSession(modelVersion: 99, namespace: previous.namespace, ready: true),
+            StoreSession(modelVersion: 2, namespace: "local-manual", ready: true),
+            StoreSession(modelVersion: 2, namespace: "desktop-manual", ready: true),
+            StoreSession(modelVersion: 2, namespace: "dist-../other", ready: true),
         ]
         for session in invalid {
-            XCTAssertThrowsError(try StoreSession.desktopNamespace(run: nil, previous: session))
+            XCTAssertThrowsError(try StoreSession.distributionNamespace(run: nil, previous: session))
         }
     }
 
     @MainActor
-    func testDraftSurvivesRestartWithOriginalBaselineAndIsNotInCloudModel() throws {
+    func testDraftSurvivesRestartWithOriginalBaselineAndIsNotInCoreDataModel() throws {
         try withStore { store in
             let id = UUID(), baseline = UUID(), draftID = UUID()
             try store.createTask(id: id, title: "M0 草稿")
@@ -1054,18 +915,18 @@ final class TaskStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testAccountGateBlocksOldReadsWritesAndDraftsWithoutCrossAccountCopy() throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Accounts-\(UUID().uuidString)")
+    func testSessionGateBlocksOldReadsWritesAndDraftsWithoutCrossLibraryCopy() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Sessions-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let first = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "account-fixture-a", accountHash: "fixture-a", cloudEnabled: true, ready: true)
-        let second = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "account-fixture-b", accountHash: "fixture-b", cloudEnabled: true, ready: true)
+        let first = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-fixture-a", ready: true)
+        let second = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-fixture-b", ready: true)
         let gate = base.appendingPathComponent("session.json")
         try JSONEncoder().encode(first).write(to: gate, options: .atomic)
         let store = try TaskStore(directory: base.appendingPathComponent(first.namespace), session: first)
         defer { try? store.close() }
         let id = UUID(), draftID = UUID()
-        try store.createTask(id: id, title: "M0 账户 A 隔离内容")
+        try store.createTask(id: id, title: "M0 任务库 A 隔离内容")
         let draft = LocalDraft(formatVersion: 1, id: draftID, taskID: id, kind: .editor,
                                title: "A", body: "A 的输入", parentIDs: [], updatedAt: Date())
         try store.saveDraft(draft)
@@ -1197,12 +1058,11 @@ final class TaskStoreTests: XCTestCase {
         }
     }
 
-    #if os(macOS)
     @MainActor
     func testLocalUpgradePreservesPhysicalRecordsRevisionsDraftsHistoryAndIsIdempotent() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Upgrade-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
-        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/dist-isolated")
         let original = try TaskStore(directory: source)
         let id = UUID(), parent = UUID(), child = UUID(), completionTaskID = UUID(), completionActionID = UUID()
         try original.createTask(id: id, title: "完整升级")
@@ -1233,7 +1093,7 @@ final class TaskStoreTests: XCTestCase {
 
         try LocalLibraryUpgrade.prepare(source: source, target: target)
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: source.path), target.path)
-        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".desktop-isolated.upgrade.json")
+        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".dist-isolated.upgrade.json")
         let receipt = try JSONDecoder().decode(LocalLibraryUpgrade.Receipt.self, from: Data(contentsOf: receiptURL))
         let backup = source.deletingLastPathComponent().appendingPathComponent(receipt.backupName)
         XCTAssertTrue(FileManager.default.fileExists(atPath: backup.appendingPathComponent("history-app.token").path))
@@ -1258,7 +1118,7 @@ final class TaskStoreTests: XCTestCase {
     func testLocalUpgradeRejectsOpenSourceAndWriterContentionWithoutChangingData() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeLocks-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
-        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/dist-isolated")
         let original = try TaskStore(directory: source)
         let id = UUID()
         try original.createTask(id: id, title: "旧应用仍打开")
@@ -1280,12 +1140,12 @@ final class TaskStoreTests: XCTestCase {
     func testLocalUpgradeRecoversPreparedAndCommittedDiskStatesWithoutOverwritingNewWrites() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeRecovery-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
-        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/dist-isolated")
         let original = try TaskStore(directory: source), first = UUID(), afterPrepared = UUID(), afterCommit = UUID()
         try original.createTask(id: first, title: "原始任务")
         try original.close()
         try LocalLibraryUpgrade.prepare(source: source, target: target)
-        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".desktop-isolated.upgrade.json")
+        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".dist-isolated.upgrade.json")
         let receipt = try JSONDecoder().decode(LocalLibraryUpgrade.Receipt.self, from: Data(contentsOf: receiptURL))
         let backup = source.deletingLastPathComponent().appendingPathComponent(receipt.backupName)
         // Reconstruct the on-disk state immediately before the atomic exchange.
@@ -1313,7 +1173,7 @@ final class TaskStoreTests: XCTestCase {
     func testLocalUpgradeAliasSharesLocksAndWidgetWritesWithTarget() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeAlias-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
-        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/dist-isolated")
         let original = try TaskStore(directory: source), id = UUID()
         try original.createTask(id: id, title: "同一事实源")
         try original.close()
@@ -1346,8 +1206,8 @@ final class TaskStoreTests: XCTestCase {
         try fm.createSymbolicLink(atPath: alias.path, withDestinationPath: source.path)
         let existing = source.appendingPathComponent("Distribution", isDirectory: true)
         try fm.createDirectory(at: existing, withIntermediateDirectories: false)
-        for target in [alias, alias.appendingPathComponent("Distribution/desktop-a"),
-                       alias.appendingPathComponent("NotCreated/desktop-a")] {
+        for target in [alias, alias.appendingPathComponent("Distribution/dist-a"),
+                       alias.appendingPathComponent("NotCreated/dist-a")] {
             XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
             XCTAssertEqual(try Data(contentsOf: sqlite), bytes)
             XCTAssertThrowsError(try fm.destinationOfSymbolicLink(atPath: source.path))
@@ -1363,7 +1223,7 @@ final class TaskStoreTests: XCTestCase {
     func testLocalUpgradeRejectsUnownedTargetsUnknownAliasesAndInvalidReceipts() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeInvalid-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
-        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/dist-isolated")
         let original = try TaskStore(directory: source), existing = try TaskStore(directory: target)
         let oldID = UUID(), targetID = UUID()
         try original.createTask(id: oldID, title: "旧任务")
@@ -1373,7 +1233,7 @@ final class TaskStoreTests: XCTestCase {
         let retained = try TaskStore(directory: target)
         XCTAssertEqual(try retained.snapshots().map(\.id), [targetID])
         try retained.close()
-        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".desktop-isolated.upgrade.json")
+        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".dist-isolated.upgrade.json")
         try Data("not a receipt".utf8).write(to: receiptURL)
         XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
         let future = LocalLibraryUpgrade.Receipt(version: 2, id: UUID(), source: source.path, target: target.path, storeUUID: "future")
@@ -1384,12 +1244,11 @@ final class TaskStoreTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: source.path, withDestinationPath: target.path)
         XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
     }
-    #endif
 
     @MainActor
     func testLocalCapturePerformanceBaseline() throws {
         try withStore { store in
-            // Real SQLite commits on this Mac; no mirror, no UI callback, no network changes.
+            // Real SQLite commits on this Mac; no UI callback or network changes.
             for index in 0..<100 { try store.createTask(id: UUID(), title: "M0 性能样例 \(index)") }
             let lines = try String(contentsOf: store.directory.appendingPathComponent("events.jsonl"), encoding: .utf8).split(separator: "\n")
             let samples = try lines.compactMap { line -> Double? in
@@ -1399,7 +1258,7 @@ final class TaskStoreTests: XCTestCase {
             XCTAssertEqual(samples.count, 100)
             let warm = Array(samples.dropFirst()), sorted = warm.sorted()
             let metrics: [String: Any] = [
-                "condition": "Local ad-hoc XCTest host on physical Mac; new SQLite store; 100 sequential captures; no CloudKit or UI callbacks; timing includes lock/refresh/save and excludes evidence append; network unchanged",
+                "condition": "Local ad-hoc XCTest host on physical Mac; new SQLite store; 100 sequential captures; no UI callbacks; timing includes lock/refresh/save and excludes evidence append; network unchanged",
                 "hostOS": ProcessInfo.processInfo.operatingSystemVersionString,
                 "initialTaskCount": 0, "finalTaskCount": 100, "coldFirstMS": samples[0], "warmSampleCount": warm.count,
                 "warmSamplesMS": warm, "warmP50MS": sorted[Int(ceil(Double(sorted.count) * 0.50)) - 1],

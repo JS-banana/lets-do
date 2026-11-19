@@ -1,4 +1,3 @@
-#if os(macOS)
 import Combine
 import Darwin
 @preconcurrency import EventKit
@@ -173,7 +172,6 @@ private struct ReminderLinks: Codable {
         body(&link)
         exports?[taskID] = link
     }
-
 
     static func read(from directory: URL) throws -> Self {
         let url = directory.appendingPathComponent("reminders-links.json")
@@ -559,4 +557,3 @@ final class MacReminders: ObservableObject {
         } catch { message = error.localizedDescription }
     }
 }
-#endif

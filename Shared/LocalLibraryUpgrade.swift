@@ -1,4 +1,3 @@
-#if os(macOS)
 import CoreData
 import Darwin
 import Foundation
@@ -238,4 +237,3 @@ enum LocalLibraryUpgrade {
         .unavailable("旧版本升级记录、路径或任务库不一致；没有覆盖任务库，请保留现有文件后检查。")
     }
 }
-#endif

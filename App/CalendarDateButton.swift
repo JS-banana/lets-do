@@ -35,17 +35,12 @@ struct CalendarDateButton: View {
                 .frame(minHeight: 36)
             }
             .padding(8)
-            #if os(macOS)
             .frame(width: 272)
-            #else
-            .frame(width: 336)
-            #endif
             .environment(\.locale, Locale(identifier: "zh_CN"))
         }
     }
 }
 
-#if os(macOS)
 struct MacCalendarNavigation: View {
     @Binding var selectedDay: Day
     let isWeek: Bool
@@ -116,4 +111,3 @@ struct MacCalendarDayBackground: View {
         .accessibilityIdentifier(identifier)
     }
 }
-#endif
