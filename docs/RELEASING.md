@@ -2,21 +2,19 @@
 
 ## 分发包与 CI
 
-Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、月 Widget，支持 macOS 14 及以上的 Apple 芯片与 Intel Mac。主应用非沙盒，Widget 保留沙盒，两者分别采用 ad hoc 完整性签名。系统提醒事项的互操作与授权单独按[提醒事项方案](MAC-REMINDERS.md)验证。存储与容器权限约束见 [Mac 分发说明](MAC-DISTRIBUTION.md)。
+Mac 下载包使用 `MacDistribution`，为 macOS 14 及以上的 Apple 芯片和 Intel Mac 构建。主应用与 Widget 分别采用 ad hoc 完整性签名。分发身份及容器权限见 [Mac 分发说明](MAC-DISTRIBUTION.md)，用户安装步骤见[使用指南](USAGE.md#安装与首次打开)。
 
-应用未经过 Apple 公证。首次打开可能需要在「系统设置 → 隐私与安全性」中单独允许该应用；不要求使用者提供开发者账号或关闭系统全局保护。
-
-[CI workflow](../.github/workflows/ci.yml) 在 `main` 推送、面向 `main` 的 Pull Request 和手动触发时运行，使用 GitHub 托管的 macOS 15 runner 与 Xcode 26.3，运行 [Mac Local XCTest](DEVELOPMENT.md#检查与构建)，并构建、校验 MacDistribution 通用包，测试更新清单。CI 仅有代码读取权限，同一分支的新运行可取消旧运行，摘要 artifact 保留七天。它不替代 GUI、Widget、升级或 Gatekeeper 验收。
+推送到 `main`、向 `main` 提 PR 或手动触发时，CI 在 GitHub 托管的 macOS 15 runner 上使用 Xcode 26.3，运行 Local XCTest，打包并校验 MacDistribution 通用包，测试更新清单。CI 只有代码读取权限，同一分支的新运行可取消旧运行，摘要 artifact 保留七天。[CI 工作流](../.github/workflows/ci.yml) · [检查与构建](DEVELOPMENT.md#检查与构建)
 
 ## 生成候选草稿
 
-[Release preview](../.github/workflows/release.yml) 自动生成待验收的草稿。公开发行在验收后由维护者触发。
+Release preview 自动生成待验收的草稿，公开发行由维护者在验收后触发。[发布工作流](../.github/workflows/release.yml)
 
 1. 合入 `main` 后，等待该提交的推送 CI 全部通过。`Release preview` 以最高的 `vX.Y.Z` 标签为基准递增补丁版本及构建号，自动为主应用和 Widget 应用这两个值。例如 `v0.3.0`（构建 `5`）之后会生成 `v0.3.1`（构建 `6`）。
 2. 打包校验通过后，流程给通过 CI 的源码提交打标签并上传 Release 草稿。标签附注保存构建号，同一提交重跑复用已分配的版本和构建号。创建新标签前会再检查 `main`，发现分支已推进时交给新提交的 CI 结果处理，运行摘要会说明跳过原因。
 3. 在运行摘要打开草稿，记录源码提交和 manifest SHA256，下载候选开始验收。
 
-日常 PR 无需改版本配置。需要指定更高的主版本或次版本时，在 [Base.xcconfig](../Config/Base.xcconfig) 设置 `MARKETING_VERSION`。自动流程优先使用高于现有标签的配置版本，构建号使用配置值与上个版本构建号加一中的较大值。Xcode 在打包时接收版本参数，源码提交和配置文件保留原样。
+日常 PR 无需改版本配置。需要指定更高的主版本或次版本时，在基础配置中设置 `MARKETING_VERSION`。自动流程优先使用高于现有标签的配置版本，构建号使用配置值与上个版本构建号加一中的较大值。Xcode 在打包时接收版本参数，源码提交和配置文件保留原样。[基础配置](../Config/Base.xcconfig)
 
 需要手动准备时，在 Actions 中从 `main` 运行 `Release preview`，填写已存在的 `tag`，保持 `publish_existing_draft=false`。手动创建的历史格式标签仍按源码配置中的版本和构建号打包。打包或上传失败时可重跑失败任务。构建产物超过七天保留期，或旧任务重跑时原计划版本已被另一提交占用，则重跑整个流程。已有草稿不完整、标签与候选不一致或资产校验失败时，流程停止并保留现有材料供排查。
 
@@ -42,7 +40,7 @@ shasum -a 256 -c SHA256SUMS
 shasum -a 256 release-manifest.json
 ```
 
-记录 manifest 散列、标签和源码提交。安装并验证下载的候选，按 [Mac 分发验收规则](MAC-DISTRIBUTION.md#候选资产验收)核对打开、检索、小组件交互、主应用退出与冷启。不要修改候选内的 Info、重新签名或另行打包后，把结果归到原资产。
+记录 manifest 散列、标签和源码提交，安装并验证草稿中的候选。验收和公开必须使用同一组资产，不重建、不重签、不修改 Info 或重传替代资产。[Mac 分发验收规则](MAC-DISTRIBUTION.md#候选资产验收)
 
 草稿仅供有仓库权限的维护者验收。公开记录应说明实际系统、硬件、验证范围和未覆盖项，不上传个人任务库、设备标识或原始私有日志。
 
@@ -87,6 +85,6 @@ SPARKLE_PUBLIC_ED_KEY="<公钥的 Base64 值>" python3 scripts/package-mac.py
 
 默认输出到独立 `.build/packages/` 工作目录；也可使用 `--output-dir` 指定空的资产目录，或用 `--output` 指定 DMG 路径。输出已存在时拒绝覆盖，完整选项见 `python3 scripts/package-mac.py --help`。
 
-打包不会安装或运行应用。Xcode 可能登记临时构建产物，脚本会精确注销本次主应用和 Widget 的构建路径；清理失败使打包失败，不做全局系统登记重置。报告、完整日志与发布诊断只保留在被忽略的 `.build/`，不作为下载资产上传。
+打包不会安装或运行应用。Xcode 可能登记临时构建产物，脚本会精确注销本次主应用和 Widget 的构建路径；清理失败使打包失败，不做全局系统登记重置。原始日志与发布诊断按开发说明留存。[留证与日志](DEVELOPMENT.md#留证与日志)
 
-本机包用于开发验证。正式候选由已校验标签的干净提交构建；本机检查、隔离安装证据与正式候选验收必须分别记录。
+本机包用于开发验证。正式候选由已校验标签的干净提交构建。
