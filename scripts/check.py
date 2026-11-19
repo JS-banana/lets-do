@@ -168,8 +168,11 @@ for name, scheme, destination, extra in jobs:
     print(name, "PASS" if process.returncode == 0 else "FAIL", "log:", result["log"], flush=True)
     if process.returncode:
         lines = log.read_text(errors="replace").splitlines()
-        diagnostics = [line.strip() for line in lines
-                       if re.search(r"(?:fatal error:|error:|\*\* TEST FAILED \*\*|Test (?:Case|Suite) .*\bfailed\b)", line, re.IGNORECASE)]
+        diagnostics = [line.strip()[:1000] for line in lines
+                       if re.search(r"(?:fatal error|error:|\*\* TEST FAILED \*\*|Test (?:Case|Suite) .*\bfailed\b|"
+                                    r"failed (?:due to|with)|signal \d+|out of memory|assertion failed|stack dump|"
+                                    r"while (?:running|evaluating|emitting|generating)|please submit a bug report)",
+                                    line, re.IGNORECASE)]
         fallback = [line.strip() for line in lines[-8:] if line.strip()]
         print("\n".join(diagnostics[-20:] or fallback), flush=True)
 

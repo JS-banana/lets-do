@@ -2,7 +2,7 @@
 
 ## 环境与运行
 
-需要 macOS 和支持 Swift 6 的完整 Xcode。检查脚本使用当前选定的 Xcode，并在报告记录实际版本；Mac 部署目标为 macOS 14，iPhone 为 iOS 17。工程仅使用 Apple 原生框架，无需安装第三方包。
+需要 macOS 和支持 Swift 6 的完整 Xcode。检查脚本使用当前选定的 Xcode，并在报告记录实际版本；Mac 部署目标为 macOS 14，iPhone 为 iOS 17。常规 Xcode 编译使用 Apple 原生框架。Mac 分发打包另下载经过 SHA256 校验的固定版 Sparkle，在独立更新助手中使用。
 
 1. 克隆仓库，打开 `Todo.xcodeproj`。
 2. 选择 `TodoM0Mac`、`My Mac`，使用默认 `Local` 配置运行主应用。
@@ -43,7 +43,7 @@ Mac 主应用可通过 EventKit 接入用户选择的系统提醒事项清单。
 | `python3 scripts/check.py desktop-compile` | DesktopLocal 主应用与 Widget 无签名编译 |
 | `python3 scripts/check.py cloud-build` | CloudDevelopment 无签名编译 |
 
-已配置有效团队签名时，可另运行 `python3 scripts/check.py desktop-build`。打包下载资产使用 `python3 scripts/package-mac.py`，具体校验与发布步骤见[发布说明](RELEASING.md)。
+已配置有效团队签名时，可另运行 `python3 scripts/check.py desktop-build`。本机打包需要设置公开的更新验签密钥，命令与发布步骤见[发布说明](RELEASING.md)。
 
 检查报告、命令、源码散列、完整日志与 XCTest 结果保存在被忽略的 `.build/`。源码在检查期间变化时，该次结果不能作为稳定版本的验收证据。分发编译和打包会注销本次构建路径的临时系统登记，不安装或启动应用。
 
