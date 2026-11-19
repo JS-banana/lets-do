@@ -115,11 +115,7 @@ struct CompactDateCalendar: View {
 
     private let weekdays = ["一", "二", "三", "四", "五", "六", "日"]
     private var daySize: CGFloat {
-        #if os(macOS)
         32
-        #else
-        44
-        #endif
     }
 
     init(selection: Binding<Day>, accessibilityIdentifier: String = "compactDateCalendar",
@@ -171,9 +167,7 @@ struct CompactDateCalendar: View {
         .onChange(of: selection) { _, value in
             displayedMonth = Self.monthStart(of: value)
         }
-        #if os(macOS)
         .onMoveCommand { direction in moveFocus(direction) }
-        #endif
     }
 
     private var gridDays: [Day?] {
@@ -236,7 +230,6 @@ struct CompactDateCalendar: View {
         .accessibilityIdentifier("\(accessibilityIdentifier)-\(day.rawValue)")
     }
 
-    #if os(macOS)
     private func moveFocus(_ direction: MoveCommandDirection) {
         let current = focusedDay ?? selection
         let delta: Int
@@ -251,7 +244,6 @@ struct CompactDateCalendar: View {
         displayedMonth = Self.monthStart(of: next)
         focusedDay = next
     }
-    #endif
 
     private static func monthStart(of day: Day) -> Day {
         let parts = day.rawValue.split(separator: "-")
@@ -323,11 +315,7 @@ struct TaskDatePopover: View {
     }
 
     private var optionHeight: CGFloat {
-        #if os(macOS)
         36
-        #else
-        44
-        #endif
     }
 
     var body: some View {
@@ -340,11 +328,7 @@ struct TaskDatePopover: View {
             }
         }
         .padding(8)
-        #if os(macOS)
         .frame(width: 272)
-        #else
-        .frame(width: 336)
-        #endif
         .tint(AppStyle.accentText(colorScheme))
         .onChange(of: form.placement) { _, value in
             failureMessage = nil
@@ -362,9 +346,7 @@ struct TaskDatePopover: View {
                 form.end = form.start
             }
         }
-        #if os(macOS)
         .onExitCommand { close() }
-        #endif
     }
 
     private var quickChoices: some View {
@@ -373,12 +355,6 @@ struct TaskDatePopover: View {
         let nextWeek = (today.weekStart ?? today).adding(days: 7)
 
         return VStack(alignment: .leading, spacing: 0) {
-            #if os(iOS)
-            HStack {
-                Spacer()
-                closeButton
-            }
-            #endif
 
             VStack(spacing: 0) {
                 quickChoice(title: "今天", detail: AppStyle.weekdayLabel(today), identifier: "scheduleToday") {
@@ -450,9 +426,6 @@ struct TaskDatePopover: View {
                     Label("选择日期", systemImage: "chevron.left")
                 }.buttonStyle(.borderless).accessibilityIdentifier("datePickerBack")
                 Spacer()
-                #if os(iOS)
-                closeButton
-                #endif
             }
             CompactDateCalendar(selection: activeDay, accessibilityIdentifier: "scheduleDatePicker")
             Divider()

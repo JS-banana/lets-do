@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct TodoApp: App {
     @StateObject private var model = PrototypeModel()
-    #if os(macOS) && M0_DISTRIBUTION
+    #if M0_DISTRIBUTION
     @StateObject private var updates = MacUpdates()
     #endif
     @Environment(\.scenePhase) private var scenePhase
@@ -16,18 +16,15 @@ struct TodoApp: App {
                 .task {
                     // Hosted tests open their own temporary TaskStore instances.
                     guard !isUnitTestHost else { return }
-                    #if os(macOS) && M0_DISTRIBUTION
+                    #if M0_DISTRIBUTION
                     updates.startIfEnabled()
                     #endif
                     if !model.loaded { await model.start() }
                 }
-                #if os(macOS)
                 .frame(minWidth: 680, minHeight: 560)
                 .handlesExternalEvents(preferring: ["\(AppDestination.scheme)://task", "\(AppDestination.scheme)://calendar", "\(AppDestination.scheme)://open"],
                                       allowing: ["\(AppDestination.scheme)://task", "\(AppDestination.scheme)://calendar", "\(AppDestination.scheme)://open"])
-                #endif
         }
-        #if os(macOS)
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1160, height: 800)
         .handlesExternalEvents(matching: ["\(AppDestination.scheme)://task", "\(AppDestination.scheme)://calendar", "\(AppDestination.scheme)://open"])
@@ -42,18 +39,14 @@ struct TodoApp: App {
             }
             #endif
         }
-        #endif
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && model.loaded {
                 Task {
-                    await model.checkAccountAndStorage()
-                    #if os(macOS)
+                    model.reload()
                     await model.reminders.refreshIfConnected()
-                    #endif
                 }
             }
         }
-        #if os(macOS)
         WindowGroup("添加任务", id: "capture", for: String.self) { _ in
             // A restored capture scene has its own automatic startup task.
             if !isUnitTestHost { QuickCaptureView(model: model) }
@@ -62,11 +55,9 @@ struct TodoApp: App {
         .windowResizability(.contentSize)
         .commandsRemoved()
         .handlesExternalEvents(matching: ["\(AppDestination.scheme)://capture"])
-        #endif
     }
 }
 
-#if os(macOS)
 private struct NewTaskActionKey: FocusedValueKey {
     typealias Value = () -> Void
 }
@@ -95,4 +86,3 @@ private struct TaskCommands: Commands {
         }
     }
 }
-#endif

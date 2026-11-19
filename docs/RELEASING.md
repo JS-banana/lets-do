@@ -2,11 +2,11 @@
 
 ## 分发包与 CI
 
-Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、月 Widget，支持 macOS 14 及以上的 Apple 芯片与 Intel Mac。主应用非沙盒，Widget 保留沙盒；两者分别采用 ad hoc 完整性签名，无 Apple 开发者证书、私钥、团队或 App Group，任务库不启用 CloudKit 镜像。系统提醒事项的互操作与授权单独按[提醒事项方案](MAC-REMINDERS.md)验证。存储与升级约束见 [Mac 分发说明](MAC-DISTRIBUTION.md)。
+Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、月 Widget，支持 macOS 14 及以上的 Apple 芯片与 Intel Mac。主应用非沙盒，Widget 保留沙盒，两者分别采用 ad hoc 完整性签名。系统提醒事项的互操作与授权单独按[提醒事项方案](MAC-REMINDERS.md)验证。存储与升级约束见 [Mac 分发说明](MAC-DISTRIBUTION.md)。
 
 应用未经过 Apple 公证。首次打开可能需要在「系统设置 → 隐私与安全性」中单独允许该应用；不要求使用者提供开发者账号或关闭系统全局保护。
 
-[CI workflow](../.github/workflows/ci.yml) 在 `main` 推送、面向 `main` 的 Pull Request 和手动触发时运行，使用 GitHub 托管的 macOS 15 runner 与 Xcode 26.3，执行[开发说明](DEVELOPMENT.md#检查与构建)中的 XCTest、Local、CloudDevelopment、DesktopLocal 和 MacDistribution 编译。CI 仅有代码读取权限，同一分支的新运行可取消旧运行，摘要 artifact 保留七天。它不替代 GUI、Widget、升级或 Gatekeeper 验收。
+[CI workflow](../.github/workflows/ci.yml) 在 `main` 推送、面向 `main` 的 Pull Request 和手动触发时运行，使用 GitHub 托管的 macOS 15 runner 与 Xcode 26.3，运行 [Mac Local XCTest](DEVELOPMENT.md#检查与构建)，并构建、校验 MacDistribution 通用包，测试更新清单。CI 仅有代码读取权限，同一分支的新运行可取消旧运行，摘要 artifact 保留七天。它不替代 GUI、Widget、升级或 Gatekeeper 验收。
 
 ## 生成候选草稿
 
@@ -20,7 +20,7 @@ Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、�
 
 需要手动准备时，在 Actions 中从 `main` 运行 `Release preview`，填写已存在的 `tag`，保持 `publish_existing_draft=false`。手动创建的历史格式标签仍按源码配置中的版本和构建号打包。打包或上传失败时可重跑失败任务。构建产物超过七天保留期，或旧任务重跑时原计划版本已被另一提交占用，则重跑整个流程。已有草稿不完整、标签与候选不一致或资产校验失败时，流程停止并保留现有材料供排查。
 
-流程核对版本、标签与 `main` 祖先关系，锁定源码提交，运行 XCTest，再构建通用安装包。打包器保留 Widget，由内到外分别签名，并严格核对主应用／Widget 的身份、版本、URL、模型与 Intent 元数据、双架构以及权限；拒绝团队证书、App Group、云权限、调试权限及调试动态库。
+流程核对版本、标签与 `main` 祖先关系，锁定源码提交，运行 XCTest，再构建通用安装包。打包器保留 Widget，由内到外分别签名，并严格核对主应用／Widget 的身份、版本、URL、模型与 Intent 元数据、双架构以及签名权限，同时检查包内没有调试动态库。
 
 候选草稿必须恰好包含四份资产：
 

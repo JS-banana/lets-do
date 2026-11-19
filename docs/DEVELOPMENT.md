@@ -2,7 +2,7 @@
 
 ## 环境与运行
 
-需要 macOS 和支持 Swift 6 的完整 Xcode。检查脚本使用当前选定的 Xcode，并在报告记录实际版本；Mac 部署目标为 macOS 14，iPhone 为 iOS 17。常规 Xcode 编译使用 Apple 原生框架。Mac 分发打包另下载经过 SHA256 校验的固定版 Sparkle，在独立更新助手中使用。
+需要 macOS 和支持 Swift 6 的完整 Xcode。检查脚本使用当前选定的 Xcode，并在报告记录实际版本；Mac 部署目标为 macOS 14。常规 Xcode 编译使用 Apple 原生框架。Mac 分发打包另下载经过 SHA256 校验的固定版 Sparkle，在独立更新助手中使用。
 
 1. 克隆仓库，打开 `Todo.xcodeproj`。
 2. 选择 `TodoM0Mac`、`My Mac`，使用默认 `Local` 配置运行主应用。
@@ -14,20 +14,14 @@ Local 的手工库位于用户 Application Support 下的 `TodoM0/Local/local-ma
 
 | 配置 | Mac scheme | 数据与权限 |
 |---|---|---|
-| `Local` | `TodoM0Mac` | 独立本机主应用；不连接 iCloud，不访问系统 Widget 共享库 |
-| `MacDistribution` | `TodoM0Distribution` | 公开 Mac 包的主应用与 Widget；无 Apple 证书、团队或 App Group，使用 Widget 自身容器中的单一本机库 |
-| `DesktopLocal` | `TodoM0Desktop` | 团队签名的 Mac 主应用与 Widget；使用同团队 App Group，不连接 iCloud |
-| `CloudDevelopment` | `TodoM0Mac` | 隔离的 CloudKit Development 库；需要实际注册的团队、容器与权限 |
+| `Local` | `TodoM0Mac` | 主应用使用独立本机任务库 |
+| `MacDistribution` | `TodoM0Distribution` | 公开 Mac 包的主应用与 Widget 共用 Widget 自身容器中的单一本机库 |
 
-iPhone 使用 `TodoM0iPhone`。`TodoM0Distribution` 的运行和归档使用 `MacDistribution`，Test Action 使用 `Local`；单元测试通过不代表分发配置或系统容器权限已经通过运行验收。
+`TodoM0Mac` 和 `TodoM0Distribution` 的归档均使用 `MacDistribution`。后者运行也使用 `MacDistribution`，Test Action 使用 `Local`；单元测试通过不代表分发配置或系统容器权限已经通过运行验收。
 
 Mac 的 XCTest 宿主通过测试 scheme 的 `M0_UNIT_TEST_HOST=1` 跳过自动开库；测试自行创建临时 TaskStore，不打开手工库。
 
 MacDistribution 主应用保留非沙盒运行方式，Widget 保留沙盒。其命名空间、容器访问、旧 Local 升级与真实验收规则集中在 [Mac 分发说明](MAC-DISTRIBUTION.md)。自动运行名称必须以字母或数字开头，最多 70 个字母、数字或连字符；分发配置会拒绝缺值、重复参数、非法名称及保留名称，不回落手工库。
-
-需要开发团队能力时，将 [Signing.example.xcconfig](../Config/Signing.example.xcconfig) 复制为 `Config/Signing.local.xcconfig`，填写自己的团队及已注册标识；本机文件不入库。这是 DesktopLocal／CloudDevelopment 的设置，不是构建 MacDistribution 的前提。App Group 权限不能通过随机 Team ID 或自签名替代。
-
-从源码运行 iPhone 可按 Xcode 支持的 Personal Team 条件配置；免费配置的有效期与能力限制不等同于公开 iPhone 分发。CloudKit 使用设备系统 Apple 账户，真实 iPhone 与跨设备同步单独验收。
 
 Mac 主应用可通过 EventKit 接入用户选择的系统提醒事项清单。配置、映射与双设备验收见[提醒事项方案](MAC-REMINDERS.md)。
 
@@ -38,16 +32,14 @@ Mac 主应用可通过 EventKit 接入用户选择的系统提醒事项清单。
 | 命令 | 覆盖范围 |
 |---|---|
 | `python3 scripts/check.py unit` | Mac Local XCTest |
-| `python3 scripts/check.py build` | Local Mac、iPhone 模拟器及设备编译 |
+| `python3 scripts/check.py build` | 本机架构的 Mac Local 编译 |
 | `python3 scripts/check.py distribution-build` | MacDistribution 主应用与 Widget 的无签名通用编译 |
-| `python3 scripts/check.py desktop-compile` | DesktopLocal 主应用与 Widget 无签名编译 |
-| `python3 scripts/check.py cloud-build` | CloudDevelopment 无签名编译 |
 
-已配置有效团队签名时，可另运行 `python3 scripts/check.py desktop-build`。本机打包需要设置公开的更新验签密钥，命令与发布步骤见[发布说明](RELEASING.md)。
+本机打包需要设置公开的更新验签密钥，命令与发布步骤见[发布说明](RELEASING.md)。
 
 检查报告、命令、源码散列、完整日志与 XCTest 结果保存在被忽略的 `.build/`。源码在检查期间变化时，该次结果不能作为稳定版本的验收证据。分发编译和打包会注销本次构建路径的临时系统登记，不安装或启动应用。
 
-编译、签名校验、原生 GUI、真实系统 Widget、iPhone 和云同步分别验证。调用 Widget 刷新接口不等于系统已经刷新；双架构编译也不等于已在两种硬件上运行。
+编译、签名校验、原生 GUI、真实系统 Widget 和提醒事项跨设备互操作分别验证。调用 Widget 刷新接口不等于系统已经刷新；双架构编译也不等于已在两种硬件上运行。
 
 ## 源码入口
 
@@ -60,14 +52,14 @@ Mac 主应用可通过 EventKit 接入用户选择的系统提醒事项清单。
 | `Shared/TaskIntents.swift` | Widget 的任务完成动作 |
 | `Widgets/` | WidgetKit 扩展入口 |
 | `Tests/` | 日期、排布、书写、会话、升级与存储检查 |
-| `Config/` | 平台配置、权限与签名模板 |
+| `Config/` | 构建配置、Info.plist 与权限 |
 | `scripts/` | 构建、测试、打包及发布入口 |
 
-任务写入复用 TaskStore；正文追加不可变版本，删除使用 tombstone。主应用负责建库与迁移，仅云配置持有 CloudKit 镜像；扩展只访问已核验的库。账户、模型或启动检查失败时保留原库与草稿，不删库重建，不跨账户自动搬运数据。
+任务写入复用 TaskStore；正文追加不可变版本，删除使用 tombstone。主应用负责建库与迁移，扩展只访问已核验的库。模型或启动检查失败时保留原库与草稿，不删库重建。
 
 ## 界面与交互
 
-从 [产品与界面设计](PRODUCT-DESIGN.md) 了解任务规则、两端入口、编辑与小组件布局。界面改动用隔离任务检查原生操作、窗口和系统小组件。验收范围与证据要求见 [M0 契约](M0-CONTRACT.md#冻结与证据准则)。
+从 [产品与界面设计](PRODUCT-DESIGN.md) 了解任务规则、导航入口、编辑与小组件布局。界面改动用隔离任务检查原生操作、窗口和系统小组件。验收范围与证据要求见 [M0 契约](M0-CONTRACT.md#冻结与证据准则)。
 
 ## 公开资料边界
 

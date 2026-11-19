@@ -1,4 +1,3 @@
-#if os(macOS)
 import Darwin
 import Foundation
 import XCTest
@@ -454,4 +453,3 @@ final class MacRemindersTests: XCTestCase {
         }
     }
 }
-#endif

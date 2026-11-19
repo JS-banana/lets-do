@@ -1,4 +1,3 @@
-#if os(macOS)
 import SwiftUI
 import WidgetKit
 
@@ -57,4 +56,3 @@ struct WidgetGalleryView: View {
         }
     }
 }
-#endif

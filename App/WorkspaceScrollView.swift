@@ -1,16 +1,12 @@
 import SwiftUI
 
-#if os(macOS)
 import AppKit
-#endif
 
 struct WorkspaceScrollView<Content: View>: View {
     private let axes: Axis.Set
     private let content: Content
-    #if os(macOS)
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    #endif
 
     init(_ axes: Axis.Set = .vertical, @ViewBuilder content: () -> Content) {
         self.axes = axes
@@ -20,18 +16,15 @@ struct WorkspaceScrollView<Content: View>: View {
     var body: some View {
         ScrollView(axes) {
             content
-                #if os(macOS)
                 .background(alignment: .topLeading) {
                     ScrollbarStyleView(opacity: contrast == .increased || reduceTransparency ? 1 : 0.86)
                         .frame(width: 0, height: 0)
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
-                #endif
         }
     }
 }
 
-#if os(macOS)
 private struct ScrollbarStyleView: NSViewRepresentable {
     let opacity: CGFloat
 
@@ -67,4 +60,3 @@ private struct ScrollbarStyleView: NSViewRepresentable {
         }
     }
 }
-#endif
