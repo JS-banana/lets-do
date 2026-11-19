@@ -1,5 +1,5 @@
 import XCTest
-@testable import TodoM0
+@testable import LetsDo
 
 final class NoteFormattingTests: XCTestCase {
     func testUTF16RangesKeepEmojiAndMergeAdjacentBold() throws {

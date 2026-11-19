@@ -153,7 +153,7 @@ final class TaskStore {
     private var callbackGeneration = UUID()
     var onChange: (() -> Void)?
     var onHistoryReadFailure: (() -> Void)?
-    private static let logger = Logger(subsystem: "com.panion.todo.m0", category: "store")
+    private static let logger = Logger(subsystem: "com.panion.letsdo", category: "store")
 
     private var context: NSManagedObjectContext {
         get throws {

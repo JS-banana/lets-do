@@ -1,10 +1,6 @@
 import Darwin
 import Foundation
 
-#if M0_DISTRIBUTION && M0_LOCAL
-#error("MacDistribution must not combine with another storage mode.")
-#endif
-
 // The same advisory lock protocol is used by both executables. A model lease
 // lasts as long as an open container; session leases cover each local operation.
 final class StoreFileLock {
@@ -51,16 +47,10 @@ struct StoreSession: Codable, Equatable, Sendable {
 
     static let modelVersion = 2
 
-    static var isLocalBuild: Bool {
-        #if M0_LOCAL
-        true
-        #else
-        false
-        #endif
-    }
+    static var isLocalBuild: Bool { !isMacDistributionBuild }
 
     static var isMacDistributionBuild: Bool {
-        #if M0_DISTRIBUTION
+        #if MAC_DISTRIBUTION
         true
         #else
         false
@@ -72,17 +62,16 @@ struct StoreSession: Codable, Equatable, Sendable {
             let fm = FileManager.default
             return try distributionBaseURL(
                 bundleIdentifier: Bundle.main.bundleIdentifier,
-                appIdentifier: Bundle.main.object(forInfoDictionaryKey: "M0DistributionAppIdentifier") as? String,
-                widgetIdentifier: Bundle.main.object(forInfoDictionaryKey: "M0DistributionWidgetIdentifier") as? String,
+                appIdentifier: Bundle.main.object(forInfoDictionaryKey: "LetsDoAppIdentifier") as? String,
+                widgetIdentifier: Bundle.main.object(forInfoDictionaryKey: "LetsDoWidgetIdentifier") as? String,
                 applicationSupport: fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                            appropriateFor: nil, create: false),
                 userHome: fm.homeDirectoryForCurrentUser
             )
         }
-        guard isLocalBuild else { throw PrototypeError.unavailable("无法确认存储配置，未打开任务库。") }
         let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                               appropriateFor: nil, create: true)
-        return base.appendingPathComponent("TodoM0/Local", isDirectory: true)
+        return base.appendingPathComponent("LetsDo/Local", isDirectory: true)
     }
 
     // Resolve the shared root before reading or publishing a session there.
@@ -105,7 +94,7 @@ struct StoreSession: Codable, Equatable, Sendable {
         default:
             throw PrototypeError.invalid("无法确认本机分发版的进程身份；没有选择其他任务库。")
         }
-        return try checkedDirectory(support.appendingPathComponent("TodoM0/MacDistribution", isDirectory: true))
+        return try checkedDirectory(support.appendingPathComponent("LetsDo/MacDistribution", isDirectory: true))
     }
 
     // lstat inspects the directory entry itself, including dangling symbolic links.
@@ -145,7 +134,7 @@ struct StoreSession: Codable, Equatable, Sendable {
     private static var requestedRunName: String? {
         // A launch argument isolates UI automation from the manual prototype store.
         let args = ProcessInfo.processInfo.arguments
-        let run = args.firstIndex(of: "-M0Run").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+        let run = args.firstIndex(of: "-LetsDoRun").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
         return run?.range(of: "^[a-zA-Z0-9-]{1,70}$", options: .regularExpression) != nil ? run : nil
     }
 
@@ -161,11 +150,11 @@ struct StoreSession: Codable, Equatable, Sendable {
     }
 
     static func distributionRunName(arguments: [String]) throws -> String? {
-        let markers = arguments.indices.dropFirst().filter { arguments[$0].hasPrefix("-M0Run") }
+        let markers = arguments.indices.dropFirst().filter { arguments[$0].hasPrefix("-LetsDoRun") }
         guard let index = markers.first else { return nil }
-        guard markers.count == 1, arguments[index] == "-M0Run", index + 1 < arguments.count,
+        guard markers.count == 1, arguments[index] == "-LetsDoRun", index + 1 < arguments.count,
               validDistributionRunName(arguments[index + 1]) else {
-            throw PrototypeError.invalid("-M0Run 需要一个以字母或数字开头、最多 70 个字母数字或连字符的独立名称，不能使用保留名称 manual；没有使用默认任务库。")
+            throw PrototypeError.invalid("-LetsDoRun 需要一个以字母或数字开头、最多 70 个字母数字或连字符的独立名称，不能使用保留名称 manual；没有使用默认任务库。")
         }
         return arguments[index + 1]
     }

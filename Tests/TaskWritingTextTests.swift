@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import TodoM0
+@testable import LetsDo
 
 final class TaskWritingTextTests: XCTestCase {
     private typealias Replacement = (range: NSRange, text: String)

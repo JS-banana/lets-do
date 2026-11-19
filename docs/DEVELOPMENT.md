@@ -5,21 +5,21 @@
 需要 macOS 和支持 Swift 6 的完整 Xcode。检查脚本使用当前选定的 Xcode，并在报告记录实际版本；Mac 部署目标为 macOS 14。常规 Xcode 编译使用 Apple 原生框架。Mac 分发打包另下载经过 SHA256 校验的固定版 Sparkle，在独立更新助手中使用。
 
 1. 克隆仓库，打开 `Todo.xcodeproj`。
-2. 选择 `TodoM0Mac`、`My Mac`，使用默认 `Local` 配置运行主应用。
-3. 自动化运行在 scheme 的启动参数中添加 `-M0Run example-01`，每轮使用新的隔离名称，禁止使用 `manual` 或其大小写变体。
+2. 选择 `LetsDo`、`My Mac`，使用默认 `Local` 配置运行主应用。
+3. 自动化运行在 scheme 的启动参数中添加 `-LetsDoRun example-01`，每轮使用新的隔离名称，禁止使用 `manual` 或其大小写变体。
 
-Local 的手工库位于用户 Application Support 下的 `TodoM0/Local/local-manual/`。实际路径可在应用「设置 → 存储详情」查看。不要用个人任务库进行自动化或迁移试验。
+Local 的手工库位于用户 Application Support 下的 `LetsDo/Local/local-manual/`。实际路径可在应用「设置 → 存储详情」查看。不要用个人任务库进行自动化或迁移试验。
 
 ## 配置与 scheme
 
-| 配置 | Mac scheme | 数据与权限 |
-|---|---|---|
-| `Local` | `TodoM0Mac` | 主应用使用独立本机任务库 |
-| `MacDistribution` | `TodoM0Distribution` | 公开 Mac 包的主应用与 Widget 共用 Widget 自身容器中的单一本机库 |
+| 配置 | Mac scheme | 主应用 Bundle ID | URL scheme | 数据与权限 |
+|---|---|---|---|---|
+| `Local` | `LetsDo` | `com.panion.letsdo.dev` | `letsdo-dev` | 主应用使用独立本机任务库 |
+| `MacDistribution` | `LetsDoDistribution` | `com.panion.letsdo` | `letsdo` | 公开 Mac 包的主应用与 Widget 共用 Widget 自身容器中的单一本机库 |
 
-`TodoM0Mac` 和 `TodoM0Distribution` 的归档均使用 `MacDistribution`。后者运行也使用 `MacDistribution`，Test Action 使用 `Local`；单元测试通过不代表分发配置或系统容器权限已经通过运行验收。
+`LetsDo` 和 `LetsDoDistribution` 的归档均使用 `MacDistribution`。后者运行也使用 `MacDistribution`，Test Action 使用 `Local`；单元测试通过不代表分发配置或系统容器权限已经通过运行验收。
 
-Mac 的 XCTest 宿主通过测试 scheme 的 `M0_UNIT_TEST_HOST=1` 跳过自动开库；测试自行创建临时 TaskStore，不打开手工库。
+Mac 的 XCTest 宿主通过测试 scheme 的 `LETSDO_UNIT_TEST_HOST=1` 跳过自动开库；测试自行创建临时 TaskStore，不打开手工库。
 
 MacDistribution 主应用保留非沙盒运行方式，Widget 保留沙盒。其命名空间、容器访问与真实验收规则集中在 [Mac 分发说明](MAC-DISTRIBUTION.md)。自动运行名称必须以字母或数字开头，最多 70 个字母、数字或连字符；分发配置会拒绝缺值、重复参数、非法名称及保留名称，不回落手工库。
 

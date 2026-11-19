@@ -1,7 +1,7 @@
 import CoreData
 import Darwin
 import XCTest
-@testable import TodoM0
+@testable import LetsDo
 
 final class TaskStoreTests: XCTestCase {
     @MainActor
@@ -323,7 +323,7 @@ final class TaskStoreTests: XCTestCase {
             let id = UUID(), style = NoteFormatting(bold: [.init(location: 0, length: 2)])
             try source.createTask(id: id, title: "archive", body: "正文", formatting: style)
             let archive = try TaskArchive.decode(source.archive().encoded())
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0WritingRestore-\(UUID())")
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("LetsDoWritingRestore-\(UUID())")
             defer { try? FileManager.default.removeItem(at: directory) }
             let restored = try TaskStore(directory: directory)
             defer { try? restored.close() }
@@ -343,7 +343,7 @@ final class TaskStoreTests: XCTestCase {
 
     @MainActor
     func testModelV1MigratesWithoutLosingPlainNotesAndExtensionDoesNotMigrate() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0V1Migration-\(UUID())")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("LetsDoV1Migration-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let modelFolder = try XCTUnwrap(Bundle.main.url(forResource: "Model", withExtension: "momd"))
@@ -385,7 +385,7 @@ final class TaskStoreTests: XCTestCase {
 
     @MainActor
     private func withStore(_ body: (TaskStore) throws -> Void) throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Tests-\(UUID().uuidString)")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("LetsDoTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = try TaskStore(directory: directory)
         defer { try? store.close() }
@@ -397,15 +397,15 @@ final class TaskStoreTests: XCTestCase {
         try withStore { store in
             let id = UUID()
             XCTAssertThrowsError(try store.createTask(id: id, title: " \n "))
-            try store.createTask(id: id, title: "  M0 中文捕获  ")
+            try store.createTask(id: id, title: "  中文捕获  ")
             try store.createTask(id: id, title: "不能覆盖首次内容")
             XCTAssertEqual(try store.snapshots().count, 1)
-            XCTAssertEqual(try store.snapshots().first?.title, "M0 中文捕获")
+            XCTAssertEqual(try store.snapshots().first?.title, "中文捕获")
             try store.close()
             let reopened = try TaskStore(directory: store.directory)
             defer { try? reopened.close() }
             XCTAssertEqual(try reopened.snapshots().first?.id, id)
-            XCTAssertEqual(try reopened.snapshots().first?.title, "M0 中文捕获")
+            XCTAssertEqual(try reopened.snapshots().first?.title, "中文捕获")
         }
     }
 
@@ -501,7 +501,7 @@ final class TaskStoreTests: XCTestCase {
     func testCompletionSetsTargetAndRepeatedIntentDoesNotToggle() throws {
         try withStore { store in
             let id = UUID()
-            try store.createTask(id: id, title: "M0")
+            try store.createTask(id: id, title: "测试任务")
             try store.setCompleted(id: id, completed: true)
             let first = try store.snapshots().first?.completedAt
             try store.setCompleted(id: id, completed: true)
@@ -517,7 +517,7 @@ final class TaskStoreTests: XCTestCase {
     func testParallelNoteBranchesAndRecoveryPreserveAllBodies() throws {
         try withStore { store in
             let taskID = UUID(), baseline = UUID(), phone = UUID(), mac = UUID(), merge = UUID()
-            try store.createTask(id: taskID, title: "M0 branches")
+            try store.createTask(id: taskID, title: "branches")
             try store.saveNoteRevision(taskID: taskID, id: baseline, body: "共同基线", parentIDs: [])
             try store.saveNoteRevision(taskID: taskID, id: phone, body: "手机离线补充", parentIDs: [baseline])
             try store.saveNoteRevision(taskID: taskID, id: mac, body: "电脑离线补充", parentIDs: [baseline])
@@ -537,7 +537,7 @@ final class TaskStoreTests: XCTestCase {
     func testNoteArrivingBeforeItsParentIsRetained() throws {
         try withStore { store in
             let id = UUID(), later = UUID(), missing = UUID()
-            try store.createTask(id: id, title: "M0 out of order")
+            try store.createTask(id: id, title: "out of order")
             try store.saveNoteRevision(taskID: id, id: later, body: "后到父版本", parentIDs: [missing])
             XCTAssertEqual(try store.snapshots().first?.heads.map(\.id), [later])
             try store.saveNoteRevision(taskID: id, id: missing, body: "父版本", parentIDs: [])
@@ -550,7 +550,7 @@ final class TaskStoreTests: XCTestCase {
     func testTrashRejectsStaleEditsUntilExplicitRestore() throws {
         try withStore { store in
             let id = UUID()
-            try store.createTask(id: id, title: "M0 delete")
+            try store.createTask(id: id, title: "delete")
             try store.moveToTrash(id: id)
             XCTAssertThrowsError(try store.updateTitle(id: id, title: "stale edit"))
             XCTAssertThrowsError(try store.setCompleted(id: id, completed: true))
@@ -566,7 +566,7 @@ final class TaskStoreTests: XCTestCase {
     func testExtensionLocalWriteIsVisibleAfterHistoryConsumption() throws {
         try withStore { app in
             let id = UUID()
-            try app.createTask(id: id, title: "M0 shared store")
+            try app.createTask(id: id, title: "shared store")
             let widget = try TaskStore(directory: app.directory, isExtension: true)
             defer { try? widget.close() }
             try widget.setCompleted(id: id, completed: true)
@@ -641,7 +641,7 @@ final class TaskStoreTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(descriptor, 0)
             defer { flock(descriptor, LOCK_UN); Darwin.close(descriptor) }
             XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
-            XCTAssertThrowsError(try store.createTask(id: UUID(), title: "M0 locked"))
+            XCTAssertThrowsError(try store.createTask(id: UUID(), title: "locked"))
             XCTAssertEqual(try store.snapshots().count, 0)
         }
     }
@@ -650,13 +650,13 @@ final class TaskStoreTests: XCTestCase {
     func testDuplicatePhysicalUUIDIsProjectedOnceAndTrashWins() throws {
         try withStore { store in
             let id = UUID(), note = UUID()
-            try store.createTask(id: id, title: "M0 original")
+            try store.createTask(id: id, title: "original")
             try store.saveNoteRevision(taskID: id, id: note, body: "保留正文", parentIDs: [])
             let context = try XCTUnwrap(store.container).viewContext
             let duplicate = NSEntityDescription.insertNewObject(forEntityName: "TaskItem", into: context)
             duplicate.setValue(id, forKey: "id")
             duplicate.setValue("000", forKey: "recordKey")
-            duplicate.setValue("M0 canonical", forKey: "title")
+            duplicate.setValue("canonical", forKey: "title")
             duplicate.setValue(Date(), forKey: "createdAt")
             duplicate.setValue(Date(), forKey: "updatedAt")
             duplicate.setValue(Date(), forKey: "deletedAt")
@@ -676,7 +676,7 @@ final class TaskStoreTests: XCTestCase {
     func testArchiveRoundTripRetainsIDsRevisionsScheduleAndTrash() throws {
         try withStore { source in
             let id = UUID(), version = UUID()
-            try source.createTask(id: id, title: "M0 独立备份")
+            try source.createTask(id: id, title: "独立备份")
             try source.scheduleTask(id: id, schedule: .allDay(start: Day("2026-12-30"), endExclusive: Day("2027-01-03")))
             try source.saveNoteRevision(taskID: id, id: version, body: "恢复文字", parentIDs: [])
             try source.setCompleted(id: id, completed: true)
@@ -717,7 +717,7 @@ final class TaskStoreTests: XCTestCase {
     @MainActor
     func testArchiveVersionAndInvalidScheduleFailBeforeWriting() throws {
         try withStore { store in
-            let invalid = TaskSnapshot(id: UUID(), title: "M0 invalid", createdAt: Date(), updatedAt: Date(), completedAt: nil,
+            let invalid = TaskSnapshot(id: UUID(), title: "invalid", createdAt: Date(), updatedAt: Date(), completedAt: nil,
                                        deletedAt: nil, schedule: .allDay(start: try Day("2026-10-22"), endExclusive: try Day("2026-10-19")),
                                        currentRevisionID: nil, revisions: [])
             let archive = TaskArchive(formatVersion: 1, modelVersion: 1, exportedAt: Date(), tasks: [invalid])
@@ -729,12 +729,12 @@ final class TaskStoreTests: XCTestCase {
 
     @MainActor
     func testExtensionDoesNotCreateOrReplaceAnInvalidStore() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Invalid-\(UUID().uuidString)")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("LetsDoInvalid-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         XCTAssertThrowsError(try TaskStore(directory: directory, isExtension: true))
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let original = Data("M0 invalid sqlite original bytes".utf8)
+        let original = Data("invalid sqlite original bytes".utf8)
         let url = directory.appendingPathComponent("tasks.sqlite")
         try original.write(to: url)
         XCTAssertThrowsError(try TaskStore(directory: directory, isExtension: true))
@@ -766,9 +766,9 @@ final class TaskStoreTests: XCTestCase {
     func testEvidenceDoesNotContainPrivateTextAndRecordsCommittedActions() throws {
         try withStore { store in
             let id = UUID()
-            try store.createTask(id: id, title: "PRIVATE-TITLE-M0-1029")
-            try store.createTask(id: id, title: "PRIVATE-TITLE-M0-1029")
-            try store.saveNoteRevision(taskID: id, id: UUID(), body: "PRIVATE-BODY-M0-8871", parentIDs: [])
+            try store.createTask(id: id, title: "PRIVATE-TITLE-1029")
+            try store.createTask(id: id, title: "PRIVATE-TITLE-1029")
+            try store.saveNoteRevision(taskID: id, id: UUID(), body: "PRIVATE-BODY-8871", parentIDs: [])
             let events = try String(contentsOf: store.directory.appendingPathComponent("events.jsonl"), encoding: .utf8)
             XCTAssertFalse(events.contains("PRIVATE-TITLE"))
             XCTAssertFalse(events.contains("PRIVATE-BODY"))
@@ -812,9 +812,9 @@ final class TaskStoreTests: XCTestCase {
     func testDraftSurvivesRestartWithOriginalBaselineAndIsNotInCoreDataModel() throws {
         try withStore { store in
             let id = UUID(), baseline = UUID(), draftID = UUID()
-            try store.createTask(id: id, title: "M0 草稿")
+            try store.createTask(id: id, title: "草稿")
             try store.saveNoteRevision(taskID: id, id: baseline, body: "基线", parentIDs: [])
-            let draft = LocalDraft(formatVersion: 1, id: draftID, taskID: id, kind: .editor, title: "M0 草稿",
+            let draft = LocalDraft(formatVersion: 1, id: draftID, taskID: id, kind: .editor, title: "草稿",
                                    body: "尚未提交的中文输入", parentIDs: [baseline], updatedAt: Date())
             try store.saveDraft(draft)
             XCTAssertEqual(try store.snapshots().first?.revisions.count, 1)
@@ -837,7 +837,7 @@ final class TaskStoreTests: XCTestCase {
     func testLateParentCannotCreateRevisionCycle() throws {
         try withStore { store in
             let id = UUID(), first = UUID(), second = UUID()
-            try store.createTask(id: id, title: "M0 cycle")
+            try store.createTask(id: id, title: "cycle")
             try store.saveNoteRevision(taskID: id, id: first, body: "first", parentIDs: [second])
             XCTAssertThrowsError(try store.saveNoteRevision(taskID: id, id: second, body: "second", parentIDs: [first]))
             XCTAssertEqual(try store.snapshots().first?.revisions.count, 1)
@@ -848,7 +848,7 @@ final class TaskStoreTests: XCTestCase {
     func testRepeatedRevisionCannotSilentlyChangeParents() throws {
         try withStore { store in
             let id = UUID(), revision = UUID()
-            try store.createTask(id: id, title: "M0 immutable")
+            try store.createTask(id: id, title: "immutable")
             try store.saveNoteRevision(taskID: id, id: revision, body: "body", parentIDs: [])
             XCTAssertThrowsError(try store.saveNoteRevision(taskID: id, id: revision, body: "body", parentIDs: [UUID()]))
         }
@@ -858,7 +858,7 @@ final class TaskStoreTests: XCTestCase {
     func testCompetingScheduleSnapshotsAlwaysSaveOneValidWholeRange() throws {
         try withStore { app in
             let id = UUID()
-            try app.createTask(id: id, title: "M0 reschedule")
+            try app.createTask(id: id, title: "reschedule")
             let secondWriter = try TaskStore(directory: app.directory, isExtension: true)
             defer { try? secondWriter.close() }
             let first = try TaskSchedule.allDay(start: Day("2026-10-19"), endExclusive: Day("2026-10-22"))
@@ -890,7 +890,7 @@ final class TaskStoreTests: XCTestCase {
 
     @MainActor
     func testIncompatibleModelIsPreservedAndCannotMigrateWithOpenLease() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0OldModel-\(UUID().uuidString)")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("LetsDoOldModel-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let oldModel = NSManagedObjectModel()
@@ -916,7 +916,7 @@ final class TaskStoreTests: XCTestCase {
 
     @MainActor
     func testSessionGateBlocksOldReadsWritesAndDraftsWithoutCrossLibraryCopy() throws {
-        let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Sessions-\(UUID().uuidString)")
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("LetsDoSessions-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         let first = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-fixture-a", ready: true)
@@ -926,7 +926,7 @@ final class TaskStoreTests: XCTestCase {
         let store = try TaskStore(directory: base.appendingPathComponent(first.namespace), session: first)
         defer { try? store.close() }
         let id = UUID(), draftID = UUID()
-        try store.createTask(id: id, title: "M0 任务库 A 隔离内容")
+        try store.createTask(id: id, title: "任务库 A 隔离内容")
         let draft = LocalDraft(formatVersion: 1, id: draftID, taskID: id, kind: .editor,
                                title: "A", body: "A 的输入", parentIDs: [], updatedAt: Date())
         try store.saveDraft(draft)
@@ -951,7 +951,7 @@ final class TaskStoreTests: XCTestCase {
     func testDuplicateRevisionWithDifferentParentsDoesNotSilentlyMerge() throws {
         try withStore { store in
             let id = UUID(), revision = UUID()
-            try store.createTask(id: id, title: "M0 duplicate note")
+            try store.createTask(id: id, title: "duplicate note")
             try store.saveNoteRevision(taskID: id, id: revision, body: "same body", parentIDs: [])
             let context = try XCTUnwrap(store.container).viewContext
             let duplicate = NSEntityDescription.insertNewObject(forEntityName: "TaskNoteRevision", into: context)
@@ -1062,7 +1062,7 @@ final class TaskStoreTests: XCTestCase {
     func testLocalCapturePerformanceBaseline() throws {
         try withStore { store in
             // Real SQLite commits on this Mac; no UI callback or network changes.
-            for index in 0..<100 { try store.createTask(id: UUID(), title: "M0 性能样例 \(index)") }
+            for index in 0..<100 { try store.createTask(id: UUID(), title: "性能样例 \(index)") }
             let lines = try String(contentsOf: store.directory.appendingPathComponent("events.jsonl"), encoding: .utf8).split(separator: "\n")
             let samples = try lines.compactMap { line -> Double? in
                 let entry = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
@@ -1081,9 +1081,9 @@ final class TaskStoreTests: XCTestCase {
             ]
             let data = try JSONSerialization.data(withJSONObject: metrics, options: [.sortedKeys])
             let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
-            attachment.name = "M0 Local capture storage baseline"; attachment.lifetime = .keepAlways
+            attachment.name = "Local capture storage baseline"; attachment.lifetime = .keepAlways
             add(attachment)
-            print("M0_LOCAL_CAPTURE_METRICS " + String(decoding: data, as: UTF8.self))
+            print("LETSDO_CAPTURE_METRICS " + String(decoding: data, as: UTF8.self))
         }
     }
 }

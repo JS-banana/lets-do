@@ -3,8 +3,7 @@
 <plist version="1.0"><dict>
     <key>CFBundleDisplayName</key><string>Let’s Do 小组件</string>
     <key>NSExtension</key><dict><key>NSExtensionPointIdentifier</key><string>com.apple.widgetkit-extension</string></dict>
-    <key>M0DistributionAppIdentifier</key><string>$(M0_DISTRIBUTION_APP_IDENTIFIER)</string>
-    <key>M0DistributionWidgetIdentifier</key><string>$(M0_DISTRIBUTION_WIDGET_IDENTIFIER)</string>
-    <key>M0URLScheme</key><string>$(M0_URL_SCHEME)</string>
-    <key>M0ModelVersion</key><integer>2</integer>
+    <key>LetsDoAppIdentifier</key><string>$(LETSDO_APP_IDENTIFIER)</string>
+    <key>LetsDoWidgetIdentifier</key><string>$(LETSDO_WIDGET_IDENTIFIER)</string>
+    <key>LetsDoURLScheme</key><string>$(LETSDO_URL_SCHEME)</string>
 </dict></plist>
