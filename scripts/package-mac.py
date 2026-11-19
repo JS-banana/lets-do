@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Build the certificate-free Mac app with native Widgets and create DMG/ZIP assets."""
 import argparse
+import base64
 import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import plistlib
 import re
@@ -11,6 +13,8 @@ import shutil
 import subprocess
 import sys
 import zipfile
+
+from sparkle import distribution
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +58,7 @@ def source_hashes():
         if path.name == "Signing.local.xcconfig":
             continue
         if (workflow or relative == Path("LICENSE") or relative.parent == Path("scripts") and path.suffix == ".py" or
-                path.suffix in (".swift", ".pbxproj", ".xcconfig", ".plist", ".entitlements", ".xcscheme") or
+                path.suffix in (".swift", ".m", ".pbxproj", ".xcconfig", ".plist", ".entitlements", ".xcscheme") or
                 path.name == "contents" or any(part.endswith(".xcassets") for part in relative.parts)):
             sources[str(relative)] = sha256(path)
     return sources
@@ -127,9 +131,54 @@ def inspect_signature(path, name, expected_entitlements=None):
     })
 
 
+def embed_updater(app, public_key):
+    sdk = distribution()
+    helper = app / "Contents/Helpers/Update.app"
+    contents = helper / "Contents"
+    executable = contents / "MacOS/Update"
+    executable.parent.mkdir(parents=True)
+    framework = contents / "Frameworks/Sparkle.framework"
+    framework.parent.mkdir()
+    run("copy-sparkle", ["ditto", str(sdk / "Sparkle.framework"), str(framework)])
+    (contents / "Resources").mkdir()
+    shutil.copy2(sdk / "LICENSE", contents / "Resources/Sparkle-LICENSE")
+    shutil.copy2(ROOT / "MacUpdater/Info.plist", contents / "Info.plist")
+    run("build-updater", ["xcrun", "clang", "-arch", "arm64", "-arch", "x86_64", "-mmacosx-version-min=14.0",
+                          "-fobjc-arc", "-O2", "-F", str(sdk), "-framework", "Sparkle", "-framework", "AppKit",
+                          "-Wl,-rpath,@executable_path/../Frameworks", str(ROOT / "MacUpdater/main.m"), "-o", str(executable)])
+
+    # Keep upstream nested signatures intact. The helper may load only the system libraries
+    # and the two slices of Sparkle extracted from the SHA256-pinned official distribution.
+    hashes = []
+    for arch in ("arm64", "x86_64"):
+        signature = run(f"sparkle-hash-{arch}", ["codesign", "-dvvv", "--arch", arch, str(framework)], capture=True)
+        hashes.append(bytes.fromhex(re.search(r"^CDHash=([0-9a-f]{40})$", signature, re.MULTILINE)[1]))
+    constraint = workspace / "Sparkle.coderequirement"
+    constraint.write_bytes(plistlib.dumps({"cdhash": {"$in": hashes}}))
+    entitlements = ROOT / "MacUpdater/Update.entitlements"
+    run("sign-updater", ["codesign", "--force", "--sign", "-", "--timestamp=none", "--options", "runtime",
+                         "--entitlements", str(entitlements), "--library-constraint", str(constraint),
+                         "--enforce-constraint-validity", str(helper)])
+    for arch in ("arm64", "x86_64"):
+        signed = run(f"updater-constraint-{arch}", ["codesign", "-dvvvvvv", "--arch", arch, str(helper)], capture=True)
+        require("Has Library Load Constraints" in signed and
+                set(re.findall(r"\[Data\] ([0-9a-f]{40})\b", signed)) == {value.hex() for value in hashes},
+                "The signed helper must restrict library loading to the pinned Sparkle slices.")
+    info_path = app / "Contents/Info.plist"
+    info = plistlib.loads(info_path.read_bytes())
+    info.update(SUFeedURL="https://raw.githubusercontent.com/JS-banana/lets-do/mac-updates/appcast.xml",
+                SUPublicEDKey=public_key, SUEnableAutomaticChecks=False, SURequireSignedFeed=True,
+                SUVerifyUpdateBeforeExtraction=True)
+    info_path.write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_BINARY))
+    return executable
+
+
 exit_code = 1
 try:
     require(sys.platform == "darwin", "Mac packaging requires macOS and Xcode.")
+    public_key = os.environ.get("SPARKLE_PUBLIC_ED_KEY", "")
+    require(len(base64.b64decode(public_key, validate=True)) == 32,
+            "Set SPARKLE_PUBLIC_ED_KEY to the Sparkle Ed25519 public key for this package.")
     require(re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version), "Use a numeric semantic MARKETING_VERSION.")
     require(re.fullmatch(r"[1-9][0-9]*", build_number), "Use a positive integer CURRENT_PROJECT_VERSION.")
     require(output.suffix.lower() == ".dmg", "--output must name a .dmg file.")
@@ -203,6 +252,7 @@ try:
     # its sandbox entitlement separate from the non-sandboxed containing app.
     run("ad-hoc-widget", ["codesign", "--force", "--sign", "-", "--timestamp=none", "--options", "runtime",
                           "--entitlements", str(ROOT / "Config" / "Widget-Distribution.entitlements"), str(widget)])
+    updater = embed_updater(app, public_key)
     run("ad-hoc-app", ["codesign", "--force", "--sign", "-", "--timestamp=none", "--options", "runtime",
                        "--entitlements", str(ROOT / "Config" / "Mac-Reminders.entitlements"), str(app)])
     run("verify-app-deep", ["codesign", "--verify", "--all-architectures", "--deep", "--strict", "--verbose=2", str(app)])
@@ -210,11 +260,20 @@ try:
     inspect_signature(app, "app", calendar_access)
     sandbox = {"com.apple.security.app-sandbox": True}
     inspect_signature(widget, "widget", sandbox)
+    helper_dir = updater.parents[2]
+    for path in helper_dir.rglob("*"):
+        if path.is_file() and not path.is_symlink():
+            with path.open("rb") as stream:
+                if stream.read(4) in magic:
+                    code.append(path)
+    expected = {binary: calendar_access, widget_binary: sandbox,
+                updater: {"com.apple.security.cs.disable-library-validation": True},
+                helper_dir / "Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate":
+                    {"com.apple.application-identifier": "org.sparkle-project.Sparkle.Autoupdate"}}
     report["architectureSlices"] = {}
     for index, path in enumerate(code, 1):
         slices = run(f"architectures-code-{index}", ["lipo", "-archs", str(path)], capture=True).strip().split()
         require(set(slices) == {"arm64", "x86_64"}, "Every embedded code object must be universal.")
-        expected = {binary: calendar_access, widget_binary: sandbox}
         inspect_signature(path, f"code-{index}", expected.get(path, {}))
         if path == binary:
             report["architectureSlices"]["app"] = sorted(slices)
@@ -251,6 +310,7 @@ try:
         "sourceIsClean": dirty.returncode == 0 and not dirty.stdout.strip(), "sourceSHA256": source_before,
         "configuration": "MacDistribution", "architectures": report["architectureSlices"],
         "signatureType": "ad-hoc", "notarized": False, "cloudEnabled": False, "widgetIncluded": True,
+        "sparklePublicEDKey": public_key,
         "verification": {"strictDeepSignature": True, "certificateAbsent": True, "sharedGroupEntitlementsAbsent": True,
                          "getTaskAllowAbsent": True, "debugDylibsAbsent": True, "widgetPresent": True,
                          "widgetSandboxEnabled": True, "modelResourcesPresent": True, "intentMetadataPresent": True,

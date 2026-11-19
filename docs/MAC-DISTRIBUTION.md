@@ -6,6 +6,12 @@ v0.2.0 的 MacDistribution 包复用现有 Mac App、Widget targets 和 Core Dat
 
 公开主应用身份为 `com.panion.todo.m0.mac`，Widget 为对应的 `.widget`，URL scheme 为 `todom0`。MacDistribution 使用独立编译条件，主应用非沙盒，Widget 保留沙盒；无团队、Apple 证书、App Group 或云权限。Local、DesktopLocal 与 CloudDevelopment 保留各自数据和权限语义，见[开发配置](DEVELOPMENT.md#配置与-scheme)。
 
+## 应用内更新的进程与权限
+
+打包器把独立的 `Update.app` 放入主应用的 `Contents/Helpers`。只有这个助手链接 Sparkle。主应用通过随进程结束而关闭的私有管道发起检查，助手只更新包含它的宿主应用。更新与验签流程见[发布说明](RELEASING.md#mac-应用内更新)。
+
+ad hoc 签名没有 Team ID，Hardened Runtime 的默认库校验会拒绝加载独立签名的 Sparkle。打包时保留 Sparkle 官方框架的原签名，只给助手设置库校验例外，并用 macOS 14 的 library load constraint 将允许的第三方代码限定为固定发行包中两种架构的 Sparkle CDHash。打包器检查两个切片签名中的约束，主应用与 Widget 沿用各自的原权限。实现见[打包脚本](../scripts/package-mac.py)和 [Apple 的库加载约束说明](https://developer.apple.com/videos/play/wwdc2023/10266/)。
+
 ## 单库与共享门禁
 
 唯一可修改的任务库位于 **Widget 自身 Application Support** 下的 `TodoM0/MacDistribution/<命名空间>/`。Widget 使用系统提供的自身目录；非沙盒主应用按固定 Widget 身份定位同一目录。角色、身份字段、路径及命名空间校验集中在 [StoreSession](../Shared/StoreSession.swift)，不维护多位置副本或另一份可写快照。

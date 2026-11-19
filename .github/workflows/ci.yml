@@ -39,7 +39,10 @@ jobs:
         run: python3 scripts/check.py "${{ matrix.check }}"
       - name: Verify the final ad hoc package
         if: matrix.check == 'distribution-build'
-        run: python3 scripts/package-mac.py
+        run: |
+          export SPARKLE_PUBLIC_ED_KEY="$(swift -e 'import CryptoKit; import Foundation; print(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation.base64EncodedString())')"
+          python3 scripts/package-mac.py
+          python3 scripts/test_mac_update_feed.py
       - name: Retain check summaries
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
