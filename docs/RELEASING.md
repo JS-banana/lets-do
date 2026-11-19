@@ -61,12 +61,28 @@ shasum -a 256 release-manifest.json
 
 发布流程串行运行，避免同时分配同一个版本。只有上传草稿和公开发行的任务获得 `contents: write`，使用 GitHub 自带的 `GITHUB_TOKEN`。自动创建标签后在同一轮运行上传草稿。
 
-## 本机打包与留证
+## Mac 应用内更新
 
-需要 macOS 和完整 Xcode，无需签名配置：
+带更新助手的候选仍交付同一组四份资产。安装过该版本的用户可从应用菜单检查更新，或开启定期检查。v0.3.4 及之前的安装需先用 DMG 覆盖一次。
+
+**首次配置。** 在维护者 Mac 上运行以下命令，Sparkle 将该项目的 Ed25519 私钥保存在登录钥匙串。在 GitHub 仓库 Settings → Secrets and variables → Actions 中，将公钥设为变量 `SPARKLE_PUBLIC_ED_KEY`，将同一密钥的私钥设为 secret `SPARKLE_PRIVATE_ED_KEY`。密钥属于项目，长期备份，私钥不要放入源码、PR 或日志。公钥在合入后生成首份候选前配置，私钥在发布为 Latest 前配置。生成与导出选项见 [Sparkle 文档](https://sparkle-project.org/documentation/)。
 
 ```sh
-python3 scripts/package-mac.py
+sparkle_tools="$(python3 scripts/sparkle.py)"
+"$sparkle_tools/bin/generate_keys" --account lets-do
+"$sparkle_tools/bin/generate_keys" --account lets-do -p
+```
+
+**日常发布。** 照上节通过 Release preview 公开已验收的草稿，勾选 `make_latest`。工作流用私钥签署原 ZIP 与更新清单，在确认 GitHub 的 Latest 指向该版本后，推进 `mac-updates` 分支上的 `appcast.xml`。客户端通过固定的 HTTPS 地址读取并验证清单和 ZIP。草稿和预发布版不会触发推送。使用 Releases 网页按钮不会执行这段流程；若已手动设为 Latest，可用同一标签和 manifest SHA256 补跑工作流。公开成功后若推送清单失败，同样补跑。已有清单必须能用当前密钥验证；更换密钥需要单独规划已安装用户的迁移。
+
+**升级验收。** 在独立 macOS 测试用户中，使用同一测试公钥的两个连续构建。从可写的安装目录打开旧版，记录任务和未提交草稿，通过测试用已签名清单发现新版，点击安装、退出并重开。核对新应用和 Widget 的实际版本、原任务与草稿、Widget 刷新；损坏 ZIP 或错误签名应保留可运行的旧版。测试密钥与正式分发分开，正式清单只推送同一份已验收的候选。
+
+## 本机打包与留证
+
+需要 macOS、完整 Xcode 和公开的更新验签密钥。使用正式公钥或临时验证公钥打包：
+
+```sh
+SPARKLE_PUBLIC_ED_KEY="<公钥的 Base64 值>" python3 scripts/package-mac.py
 ```
 
 默认输出到独立 `.build/packages/` 工作目录；也可使用 `--output-dir` 指定空的资产目录，或用 `--output` 指定 DMG 路径。输出已存在时拒绝覆盖，完整选项见 `python3 scripts/package-mac.py --help`。

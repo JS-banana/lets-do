@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate a release tag, build certificate-free Mac assets, or publish verified assets."""
 import argparse
+import base64
 import datetime
 import hashlib
 import json
@@ -10,6 +11,8 @@ import re
 import subprocess
 import sys
 from typing import NamedTuple
+
+import mac_update_feed as feed
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -212,6 +215,11 @@ def verify_assets(version, commit, asset_dir):
     require(manifest.get("artifacts") == [{"name": name, "sha256": hashes[name],
             "bytes": (asset_dir / name).stat().st_size} for name in names[:2]],
             "The manifest's archive hashes or sizes do not match.")
+    # Check the tagged source as well as the manifest so an update-capable
+    # candidate cannot accidentally be published as a legacy manual install.
+    source = run("check-updater-source", ["git", "ls-tree", "--name-only", commit, "scripts/sparkle.py"]).stdout
+    if source or "sparklePublicEDKey" in manifest:
+        feed.candidate_key(assets[1], manifest, repository())
     return assets, hashes
 
 
@@ -353,7 +361,64 @@ def prepare(version, commit, asset_dir):
                 run("delete-failed-draft", ["gh", "api", "--method", "DELETE", f"{endpoint}/{release_id}"], allowed_failure=True)
 
 
-def publish(version, commit, manifest_sha256, make_latest):
+def stage_stable_feed(repo, version, private_key):
+    """Prepare the signed Git tree before making an accepted release public."""
+    ref = "refs/heads/" + feed.BRANCH
+    base = remote_refs(ref).get(ref)
+    assets = logs / "candidate-assets"
+    manifest = json.loads((assets / "release-manifest.json").read_bytes())
+    if "sparklePublicEDKey" not in manifest:
+        require(base is None, "A legacy candidate cannot replace Latest after in-app updates have started.")
+        return None
+
+    archive = assets / asset_names(version.tag)[1]
+    key = feed.candidate_key(archive, manifest, repo)
+    previous = None
+    if base:
+        blob = json.loads(run("read-stable-feed", ["gh", "api",
+                              f"repos/{repo}/contents/{feed.FILE}?ref={base}"]).stdout)
+        require(blob.get("type") == "file" and blob.get("encoding") == "base64", "Invalid existing appcast.")
+        previous = base64.b64decode(blob["content"])
+    tool_dir = run("prepare-sparkle", [sys.executable, "scripts/sparkle.py"]).stdout.strip()
+    content = feed.signed_feed(Path(tool_dir) / "bin/sign_update", private_key, archive, key, version, repo, logs, previous)
+    if content == previous:
+        return base, base
+
+    git = f"repos/{repo}/git"
+    # This branch contains only the generated feed. An orphan first commit
+    # works without a pre-created branch, Pages configuration, or a deploy key.
+    tree_file = logs / "feed-tree.json"
+    tree_request = {"tree": [{"path": feed.FILE, "type": "blob", "mode": "100644", "content": content.decode()}]}
+    if base:
+        tree_request["base_tree"] = run("read-feed-tree", ["gh", "api", f"{git}/commits/{base}",
+                                                          "--jq", ".tree.sha"]).stdout.strip()
+    tree_file.write_text(json.dumps(tree_request))
+    tree = json.loads(run("stage-feed-tree", ["gh", "api", f"{git}/trees", "--input", str(tree_file)]).stdout)
+    commit_file = logs / "feed-commit.json"
+    commit_file.write_text(json.dumps({"message": f"Publish update for {version.tag}", "tree": tree["sha"],
+                                      "parents": [base] if base else []}))
+    commit = json.loads(run("stage-feed-commit", ["gh", "api", f"{git}/commits", "--input", str(commit_file)]).stdout)
+    require(re.fullmatch(r"[0-9a-f]{40}", commit.get("sha", "")), "Invalid staged update feed commit.")
+    return base, commit["sha"]
+
+
+def advance_stable_feed(repo, staged):
+    base, commit = staged
+    ref = "refs/heads/" + feed.BRANCH
+    if commit == base:
+        require(remote_refs(ref).get(ref) == base, "The signed feed changed during this retry.")
+        return
+    # PATCH without force rejects any competing commit based on the same tip.
+    endpoint = f"repos/{repo}/git/refs"
+    if base:
+        run("advance-feed", ["gh", "api", "--method", "PATCH", f"{endpoint}/heads/{feed.BRANCH}",
+                             "-f", f"sha={commit}", "-F", "force=false"])
+    else:
+        run("create-feed", ["gh", "api", "--method", "POST", endpoint, "-f", f"ref={ref}", "-f", f"sha={commit}"])
+    require(remote_refs(ref).get(ref) == commit, "The published update feed could not be confirmed.")
+
+
+def publish(version, commit, manifest_sha256, make_latest, private_key):
     require(re.fullmatch(r"[0-9a-f]{64}", manifest_sha256), "Provide the SHA256 of the runtime-verified candidate manifest.")
     tag = version.tag
     repo = repository()
@@ -364,6 +429,7 @@ def publish(version, commit, manifest_sha256, make_latest):
     require(candidate is not None, "An existing release candidate is required.")
     hashes = download_candidate(repo, version, commit, candidate)
     require(hashes["release-manifest.json"] == manifest_sha256, "Candidate assets differ from the runtime-verified manifest.")
+    staged_feed = stage_stable_feed(repo, version, private_key) if make_latest else None
     current = release_info(repo, tag)
     require(current is not None and current.get("id") == candidate["id"] and current.get("draft") == candidate["draft"],
             "The candidate changed during verification.")
@@ -389,6 +455,8 @@ def publish(version, commit, manifest_sha256, make_latest):
         latest = json.loads(run("verify-latest", ["gh", "api", f"repos/{repo}/releases/latest"]).stdout)
         require(latest.get("id") == published["id"], "GitHub did not confirm this release as Latest.")
     require(remote_refs(ref).get(ref) == refs[ref], "The remote tag changed during publication.")
+    if staged_feed:
+        advance_stable_feed(repo, staged_feed)
     mode = "Latest" if make_latest else "a prerelease"
     message = f"{tag} is public as {mode} with the same four runtime-verified assets."
     print(message)
@@ -403,6 +471,8 @@ def print_candidate_outputs(version, commit):
 
 
 def main():
+    # Only the pinned Sparkle signer receives this value via standard input.
+    private_key = os.environ.pop("SPARKLE_PRIVATE_ED_KEY", "").strip()
     if args.command == "plan":
         version = plan_candidate(args.commit)
         if version is not None:
@@ -430,7 +500,7 @@ def main():
     elif args.command == "prepare":
         prepare(version, resolved, args.asset_dir)
     else:
-        publish(version, resolved, args.manifest_sha256, args.make_latest)
+        publish(version, resolved, args.manifest_sha256, args.make_latest, private_key)
 
 
 try:
