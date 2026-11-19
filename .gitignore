@@ -6,9 +6,6 @@
 build/
 DerivedData/
 
-# Developer-local signing configuration.
-Config/Signing.local.xcconfig
-
 # Xcode per-user state.
 *.xcuserstate
 xcuserdata/

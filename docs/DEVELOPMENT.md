@@ -15,7 +15,6 @@ Local 的手工库位于用户 Application Support 下的 `TodoM0/Local/local-ma
 | 配置 | Mac scheme | 数据与权限 |
 |---|---|---|
 | `Local` | `TodoM0Mac` | 主应用使用独立本机任务库 |
-| `DesktopLocal` | `TodoM0Desktop` | 使用同团队 App Group 的本机库 |
 | `MacDistribution` | `TodoM0Distribution` | 公开 Mac 包的主应用与 Widget 共用 Widget 自身容器中的单一本机库 |
 
 `TodoM0Mac` 和 `TodoM0Distribution` 的归档均使用 `MacDistribution`。后者运行也使用 `MacDistribution`，Test Action 使用 `Local`；单元测试通过不代表分发配置或系统容器权限已经通过运行验收。
@@ -34,8 +33,6 @@ Mac 主应用可通过 EventKit 接入用户选择的系统提醒事项清单。
 |---|---|
 | `python3 scripts/check.py unit` | Mac Local XCTest |
 | `python3 scripts/check.py build` | 本机架构的 Mac Local 编译 |
-| `python3 scripts/check.py desktop-build` | 团队签名桌面配置编译 |
-| `python3 scripts/check.py desktop-compile` | 桌面配置的无签名编译 |
 | `python3 scripts/check.py distribution-build` | MacDistribution 主应用与 Widget 的无签名通用编译 |
 
 本机打包需要设置公开的更新验签密钥，命令与发布步骤见[发布说明](RELEASING.md)。

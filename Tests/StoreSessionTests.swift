@@ -57,14 +57,14 @@ final class StoreSessionTests: XCTestCase {
         ] {
             XCTAssertThrowsError(try StoreSession.distributionRunName(arguments: invalid))
         }
-        let previous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-capture-01", ready: true)
-        XCTAssertEqual(try StoreSession.desktopNamespace(run: StoreSession.distributionRunName(arguments: ["app"]), previous: previous), previous.namespace)
+        let previous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-capture-01", ready: true)
+        XCTAssertEqual(try StoreSession.distributionNamespace(run: StoreSession.distributionRunName(arguments: ["app"]), previous: previous), previous.namespace)
     }
 
     func testDistributionLegacyMappingNeverSelectsManualForAnExplicitRun() throws {
         let support = URL(fileURLWithPath: "/isolated-home/Library/Application Support", isDirectory: true)
-        let isolated = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-capture-01", ready: true)
-        let manual = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-manual", ready: true)
+        let isolated = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-capture-01", ready: true)
+        let manual = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-manual", ready: true)
         XCTAssertEqual(try isolated.legacyLocalDirectory(applicationSupport: support, arguments: ["app", "-M0Run", "capture-01"]),
                        support.appendingPathComponent("TodoM0/Local/local-capture-01", isDirectory: true))
         XCTAssertEqual(try isolated.legacyLocalDirectory(applicationSupport: support, arguments: ["app"]).lastPathComponent, "local-capture-01")
@@ -74,7 +74,7 @@ final class StoreSessionTests: XCTestCase {
         for reserved in ["manual", "MANUAL", "mAnUaL"] {
             XCTAssertThrowsError(try manual.legacyLocalDirectory(applicationSupport: support, arguments: ["app", "-M0Run", reserved]))
         }
-        let ambiguous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-MANUAL", ready: true)
+        let ambiguous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-MANUAL", ready: true)
         XCTAssertThrowsError(try ambiguous.legacyLocalDirectory(applicationSupport: support, arguments: ["app"]))
     }
 
@@ -83,8 +83,8 @@ final class StoreSessionTests: XCTestCase {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Modes-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
-        let local = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-first", ready: true)
-        let other = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-second", ready: true)
+        let local = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-first", ready: true)
+        let other = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-second", ready: true)
         let gate = base.appendingPathComponent("session.json")
         try JSONEncoder().encode(local).write(to: gate, options: .atomic)
         let localStore = try TaskStore(directory: base.appendingPathComponent(local.namespace), session: local)

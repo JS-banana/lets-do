@@ -4,7 +4,6 @@ import argparse
 import datetime
 import hashlib
 import json
-import os
 from pathlib import Path
 import platform
 import re
@@ -13,15 +12,14 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument("check", choices=["build", "unit", "desktop-build", "desktop-compile", "distribution-build"])
+parser.add_argument("check", choices=["build", "unit", "distribution-build"])
 args = parser.parse_args()
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 output = ROOT / ".build" / "checks" / f"{stamp}-{args.check}"
 output.mkdir(parents=True, exist_ok=False)
 base = ["xcodebuild", "-project", "Todo.xcodeproj", "-jobs", "4"]
-configuration = ("MacDistribution" if args.check == "distribution-build" else
-                 "DesktopLocal" if args.check in ("desktop-build", "desktop-compile") else
-                 "Local")
+configuration = "MacDistribution" if args.check == "distribution-build" else "Local"
+derived = "distribution" if args.check == "distribution-build" else "mac"
 
 
 def parse_test_summary(log_path):
@@ -85,7 +83,7 @@ def collect_source_hashes():
         if path.name == "Signing.local.xcconfig":
             continue
         if (relative.parent == Path("scripts") and path.suffix == ".py" or
-                path.suffix in (".swift", ".pbxproj", ".xcconfig", ".plist", ".entitlements", ".xcscheme") or
+                path.suffix in (".swift", ".m", ".pbxproj", ".xcconfig", ".plist", ".entitlements", ".xcscheme") or
                 path.name == "contents" or
                 any(part.endswith(".xcassets") for part in relative.parts)):
             sources[str(relative)] = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -98,10 +96,6 @@ jobs = []
 if args.check == "distribution-build":
     jobs = [("mac-distribution-build", "TodoM0Distribution", "generic/platform=macOS",
              ["build", "CODE_SIGNING_ALLOWED=NO", "ARCHS=arm64 x86_64", "ONLY_ACTIVE_ARCH=NO"])]
-elif args.check in ("desktop-build", "desktop-compile"):
-    jobs = [("mac-desktop-build", "TodoM0Desktop", "platform=macOS,arch=" + platform.machine(), ["build"])]
-    if args.check == "desktop-compile":
-        jobs[0][3].append("CODE_SIGNING_ALLOWED=NO")
 elif args.check == "build":
     jobs = [("mac-build", "TodoM0Mac", "platform=macOS,arch=" + platform.machine(), ["build"])]
 else:
@@ -112,7 +106,7 @@ else:
 results = []
 for name, scheme, destination, extra in jobs:
     command = base + ["-scheme", scheme, "-configuration", configuration, "-destination", destination,
-                      "-derivedDataPath", str(ROOT / ".build" / ("distribution" if args.check == "distribution-build" else "desktop" if args.check in ("desktop-build", "desktop-compile") else "mac"))] + extra
+                      "-derivedDataPath", str(ROOT / ".build" / derived)] + extra
     print("Running", name, flush=True)
     log = output / f"{name}.log"
     started = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -140,7 +134,6 @@ for name, scheme, destination, extra in jobs:
 
 registration_cleanup = []
 cleanup_passed = True
-derived = "distribution" if args.check == "distribution-build" else "desktop" if args.check in ("desktop-build", "desktop-compile") else "mac"
 app = ROOT / ".build" / derived / "Build" / "Products" / configuration / "Let's Do.app"
 widget = app / "Contents" / "PlugIns" / "TodoM0MacWidget.appex"
 if app.is_dir():

@@ -12,7 +12,7 @@
 ## 修改与验证
 
 - 工程入口为 `Todo.xcodeproj`，应用和 Widget 使用原生框架；Mac 分发包的独立更新助手使用固定版本的 Sparkle。修改日期、存储、Intent 时检查 Shared 的共同规则及调用方，按[检查与构建](docs/DEVELOPMENT.md#检查与构建)运行对应验证。
-- 区分 Local、DesktopLocal 与 MacDistribution 的库路径和权限。公开 Mac 包须按 MacDistribution 配置验证。
+- 区分 Local 与 MacDistribution 的库路径和权限。公开 Mac 包须按 MacDistribution 配置验证。
 - 自动运行使用新的隔离 `-M0Run` 名称，禁止使用手工库及 `manual` 的大小写变体。无效分发参数必须安全拒绝，不能落入默认库。
 - 构建、XCTest、签名校验、原生 GUI、系统 Widget、系统提醒事项互操作分别留证；不把刷新请求、同进程测试或编译通过记作系统运行通过。
 - 报告和日志保存在被忽略的 `.build/`；检查期间源码变化时不能作为稳定版本验收。最终运行验收绑定同一候选资产与散列，公开时不得重建、重签或重传替代资产。

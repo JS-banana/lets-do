@@ -18,7 +18,7 @@ ad hoc 签名没有 Team ID，Hardened Runtime 的默认库校验会拒绝加载
 
 [TaskStore](../Shared/TaskStore.swift) 统一处理主应用、Widget 和 Intent 的 Core Data 操作。主应用负责初始化与迁移，启动时先阻断扩展，关闭旧连接，准备并打开目标库，再发布就绪会话。扩展只访问已核验的现有库，不建库、不迁移。
 
-共享会话限制命名空间和就绪状态；模型租约保护打开的模型，写锁串行化修改。旧时间线、已切换空间或启动失败不能绕过门禁写入其他库。正文使用不可变版本与父关系，删除使用 tombstone；完成动作设置目标状态，重复完成不会反转状态，但不等于请求去重。
+共享会话限制命名空间和就绪状态；模型租约保护打开的模型，写锁串行化修改。旧时间线、已切换空间或启动失败不能绕过门禁写入其他库。启动时如发现旧分发命名空间的会话记录，应用会拒绝开库并保留原库与草稿。正文使用不可变版本与父关系，删除使用 tombstone；完成动作设置目标状态，重复完成不会反转状态，但不等于请求去重。
 
 macOS 的容器权限仍由系统决定。[Apple 的容器访问说明](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox)指出，macOS 14 起容器访问与代码签名关联，非沙盒应用访问其他容器也可能需要授权；[TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)解释了签名要求。同一 Bundle ID 或相同路径不能替代两次不同 ad hoc 构建的实际访问验证，不通过关闭系统保护或修改 Widget 沙盒绕过授权。
 
@@ -26,7 +26,7 @@ macOS 的容器权限仍由系统决定。[Apple 的容器访问说明](https://
 
 升级只在 MacDistribution 主应用的初次启动流程中执行，由 [LocalLibraryUpgrade.prepare](../Shared/LocalLibraryUpgrade.swift) 集中负责。
 
-1. **选择同名旧库。** `desktop-<名称>` 只对应用户 Application Support 中的 `TodoM0/Local/local-<同名>/`。无参数的 `desktop-manual` 对应手工库；显式 `-M0Run` 必须使用独立名称，拒绝缺值、重复、非法名称以及 `manual` 的任意大小写变体。无参数冷启沿用已核验的空间，不猜测其他旧库。
+1. **选择同名旧库。** `dist-<名称>` 只对应用户 Application Support 中的 `TodoM0/Local/local-<同名>/`。无参数的 `dist-manual` 对应手工库；显式 `-M0Run` 必须使用独立名称，拒绝缺值、重复、非法名称以及 `manual` 的任意大小写变体。无参数冷启沿用已核验的空间，不猜测其他旧库。
 2. **关闭并锁定。** 目标父目录的迁移锁串行化准备过程；源库按写锁独占、模型锁独占的顺序锁定。旧应用仍持有模型租约时阻断升级，要求先退出旧应用，不杀进程、不复制活动数据库。源为真实目录时，在创建目标父目录前和锁内分别检查解析后的路径，拒绝通过祖先链接指向源自身或其后代。
 3. **完整复制并验证。** 使用 Core Data 原生 `replacePersistentStore` 复制 SQLite，沿用历史追踪选项；复制捕获、编辑草稿及本地事件记录。私有 stage 由 TaskStore 打开、校验任务／正文／草稿并消费历史，随后关闭。保留任务 UUID、recordKey、全部正文版本、父关系、格式、tombstone 与历史记录，不用任务 JSON 导入替代完整迁移。新库的历史游标从 nil 回放，原游标仍留在备份中。
 4. **准备目标。** receipt 将事务、源与目标位置及源 store UUID 绑定；stage 带有匹配的归属记录后才安装为目标。已有目标无匹配记录、未知 symlink、损坏或未来版本记录均阻断并保留材料，不猜测归属、不覆盖其他库。源确实不存在且无升级记录时，不执行旧库迁移，由正常开库流程检查分发库。

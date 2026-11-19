@@ -697,4 +697,3 @@ private struct TaskWritingPlatformEditor: NSViewRepresentable {
         }
     }
 }
-

@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [unit, desktop-compile, distribution-build]
+        check: [unit, distribution-build]
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,8 +35,9 @@ jobs:
         run: |
           test -d "$DEVELOPER_DIR"
           xcodebuild -version
-      - name: Run project checks
-        run: python3 scripts/check.py "${{ matrix.check }}"
+      - name: Run unit tests
+        if: matrix.check == 'unit'
+        run: python3 scripts/check.py unit
       - name: Verify the final ad hoc package
         if: matrix.check == 'distribution-build'
         run: |

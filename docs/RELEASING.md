@@ -6,7 +6,7 @@ Mac 下载包使用 `MacDistribution`，包含主应用和原生今日、周、�
 
 应用未经过 Apple 公证。首次打开可能需要在「系统设置 → 隐私与安全性」中单独允许该应用；不要求使用者提供开发者账号或关闭系统全局保护。
 
-[CI workflow](../.github/workflows/ci.yml) 在 `main` 推送、面向 `main` 的 Pull Request 和手动触发时运行，使用 GitHub 托管的 macOS 15 runner 与 Xcode 26.3，运行 [Mac Local XCTest](DEVELOPMENT.md#检查与构建)，执行 DesktopLocal 无签名编译，并构建、校验 MacDistribution 通用包，测试更新清单。CI 仅有代码读取权限，同一分支的新运行可取消旧运行，摘要 artifact 保留七天。它不替代 GUI、Widget、升级或 Gatekeeper 验收。
+[CI workflow](../.github/workflows/ci.yml) 在 `main` 推送、面向 `main` 的 Pull Request 和手动触发时运行，使用 GitHub 托管的 macOS 15 runner 与 Xcode 26.3，运行 [Mac Local XCTest](DEVELOPMENT.md#检查与构建)，并构建、校验 MacDistribution 通用包，测试更新清单。CI 仅有代码读取权限，同一分支的新运行可取消旧运行，摘要 artifact 保留七天。它不替代 GUI、Widget、升级或 Gatekeeper 验收。
 
 ## 生成候选草稿
 

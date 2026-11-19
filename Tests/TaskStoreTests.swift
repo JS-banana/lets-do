@@ -791,19 +791,20 @@ final class TaskStoreTests: XCTestCase {
         XCTAssertThrowsError(try StoreSession(modelVersion: 99, namespace: "local-test", ready: true).directory())
     }
 
-    func testDesktopColdLaunchKeepsLibraryAndRejectsInvalidPublishedSelection() throws {
-        let previous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-capture-a", ready: false)
-        XCTAssertEqual(try StoreSession.desktopNamespace(run: nil, previous: nil), "desktop-manual")
-        XCTAssertEqual(try StoreSession.desktopNamespace(run: nil, previous: previous), previous.namespace)
-        XCTAssertEqual(try StoreSession.desktopNamespace(run: "capture-b", previous: previous), "desktop-capture-b")
-        XCTAssertThrowsError(try StoreSession.desktopNamespace(run: "../other", previous: nil))
+    func testDistributionColdLaunchKeepsLibraryAndRejectsInvalidPublishedSelection() throws {
+        let previous = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-capture-a", ready: false)
+        XCTAssertEqual(try StoreSession.distributionNamespace(run: nil, previous: nil), "dist-manual")
+        XCTAssertEqual(try StoreSession.distributionNamespace(run: nil, previous: previous), previous.namespace)
+        XCTAssertEqual(try StoreSession.distributionNamespace(run: "capture-b", previous: previous), "dist-capture-b")
+        XCTAssertThrowsError(try StoreSession.distributionNamespace(run: "../other", previous: nil))
         let invalid = [
             StoreSession(modelVersion: 99, namespace: previous.namespace, ready: true),
             StoreSession(modelVersion: 2, namespace: "local-manual", ready: true),
-            StoreSession(modelVersion: 2, namespace: "desktop-../other", ready: true),
+            StoreSession(modelVersion: 2, namespace: "desktop-manual", ready: true),
+            StoreSession(modelVersion: 2, namespace: "dist-../other", ready: true),
         ]
         for session in invalid {
-            XCTAssertThrowsError(try StoreSession.desktopNamespace(run: nil, previous: session))
+            XCTAssertThrowsError(try StoreSession.distributionNamespace(run: nil, previous: session))
         }
     }
 
@@ -918,8 +919,8 @@ final class TaskStoreTests: XCTestCase {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Sessions-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let first = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-fixture-a", ready: true)
-        let second = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "desktop-fixture-b", ready: true)
+        let first = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-fixture-a", ready: true)
+        let second = StoreSession(modelVersion: StoreSession.modelVersion, namespace: "dist-fixture-b", ready: true)
         let gate = base.appendingPathComponent("session.json")
         try JSONEncoder().encode(first).write(to: gate, options: .atomic)
         let store = try TaskStore(directory: base.appendingPathComponent(first.namespace), session: first)
@@ -1061,7 +1062,7 @@ final class TaskStoreTests: XCTestCase {
     func testLocalUpgradePreservesPhysicalRecordsRevisionsDraftsHistoryAndIsIdempotent() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0Upgrade-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
-        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/dist-isolated")
         let original = try TaskStore(directory: source)
         let id = UUID(), parent = UUID(), child = UUID(), completionTaskID = UUID(), completionActionID = UUID()
         try original.createTask(id: id, title: "完整升级")
@@ -1092,7 +1093,7 @@ final class TaskStoreTests: XCTestCase {
 
         try LocalLibraryUpgrade.prepare(source: source, target: target)
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: source.path), target.path)
-        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".desktop-isolated.upgrade.json")
+        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".dist-isolated.upgrade.json")
         let receipt = try JSONDecoder().decode(LocalLibraryUpgrade.Receipt.self, from: Data(contentsOf: receiptURL))
         let backup = source.deletingLastPathComponent().appendingPathComponent(receipt.backupName)
         XCTAssertTrue(FileManager.default.fileExists(atPath: backup.appendingPathComponent("history-app.token").path))
@@ -1117,7 +1118,7 @@ final class TaskStoreTests: XCTestCase {
     func testLocalUpgradeRejectsOpenSourceAndWriterContentionWithoutChangingData() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeLocks-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
-        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/dist-isolated")
         let original = try TaskStore(directory: source)
         let id = UUID()
         try original.createTask(id: id, title: "旧应用仍打开")
@@ -1139,12 +1140,12 @@ final class TaskStoreTests: XCTestCase {
     func testLocalUpgradeRecoversPreparedAndCommittedDiskStatesWithoutOverwritingNewWrites() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeRecovery-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
-        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/dist-isolated")
         let original = try TaskStore(directory: source), first = UUID(), afterPrepared = UUID(), afterCommit = UUID()
         try original.createTask(id: first, title: "原始任务")
         try original.close()
         try LocalLibraryUpgrade.prepare(source: source, target: target)
-        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".desktop-isolated.upgrade.json")
+        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".dist-isolated.upgrade.json")
         let receipt = try JSONDecoder().decode(LocalLibraryUpgrade.Receipt.self, from: Data(contentsOf: receiptURL))
         let backup = source.deletingLastPathComponent().appendingPathComponent(receipt.backupName)
         // Reconstruct the on-disk state immediately before the atomic exchange.
@@ -1172,7 +1173,7 @@ final class TaskStoreTests: XCTestCase {
     func testLocalUpgradeAliasSharesLocksAndWidgetWritesWithTarget() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeAlias-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
-        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/dist-isolated")
         let original = try TaskStore(directory: source), id = UUID()
         try original.createTask(id: id, title: "同一事实源")
         try original.close()
@@ -1205,8 +1206,8 @@ final class TaskStoreTests: XCTestCase {
         try fm.createSymbolicLink(atPath: alias.path, withDestinationPath: source.path)
         let existing = source.appendingPathComponent("Distribution", isDirectory: true)
         try fm.createDirectory(at: existing, withIntermediateDirectories: false)
-        for target in [alias, alias.appendingPathComponent("Distribution/desktop-a"),
-                       alias.appendingPathComponent("NotCreated/desktop-a")] {
+        for target in [alias, alias.appendingPathComponent("Distribution/dist-a"),
+                       alias.appendingPathComponent("NotCreated/dist-a")] {
             XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
             XCTAssertEqual(try Data(contentsOf: sqlite), bytes)
             XCTAssertThrowsError(try fm.destinationOfSymbolicLink(atPath: source.path))
@@ -1222,7 +1223,7 @@ final class TaskStoreTests: XCTestCase {
     func testLocalUpgradeRejectsUnownedTargetsUnknownAliasesAndInvalidReceipts() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("TodoM0UpgradeInvalid-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
-        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/desktop-isolated")
+        let source = base.appendingPathComponent("Local/local-isolated"), target = base.appendingPathComponent("Distribution/dist-isolated")
         let original = try TaskStore(directory: source), existing = try TaskStore(directory: target)
         let oldID = UUID(), targetID = UUID()
         try original.createTask(id: oldID, title: "旧任务")
@@ -1232,7 +1233,7 @@ final class TaskStoreTests: XCTestCase {
         let retained = try TaskStore(directory: target)
         XCTAssertEqual(try retained.snapshots().map(\.id), [targetID])
         try retained.close()
-        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".desktop-isolated.upgrade.json")
+        let receiptURL = target.deletingLastPathComponent().appendingPathComponent(".dist-isolated.upgrade.json")
         try Data("not a receipt".utf8).write(to: receiptURL)
         XCTAssertThrowsError(try LocalLibraryUpgrade.prepare(source: source, target: target))
         let future = LocalLibraryUpgrade.Receipt(version: 2, id: UUID(), source: source.path, target: target.path, storeUUID: "future")

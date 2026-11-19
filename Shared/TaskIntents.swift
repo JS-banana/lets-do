@@ -27,7 +27,7 @@ struct SetTaskCompletedIntent: AppIntent {
             defer { try? store.close() }
             let actionID = try store.setCompleted(id: id, completed: completed)
             store.record("intent.complete", id: id, actionID: actionID,
-                         outcome: "desktop-local-committed")
+                         outcome: "local-committed")
             WidgetCenter.shared.reloadAllTimelines()
             return .result(dialog: "已保存在这台设备。")
         } catch {

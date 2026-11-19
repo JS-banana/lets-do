@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-#if M0_DISTRIBUTION && (M0_LOCAL || M0_DESKTOP)
+#if M0_DISTRIBUTION && M0_LOCAL
 #error("MacDistribution must not combine with another storage mode.")
 #endif
 
@@ -51,21 +51,8 @@ struct StoreSession: Codable, Equatable, Sendable {
 
     static let modelVersion = 2
 
-    static var groupID: String {
-        Bundle.main.object(forInfoDictionaryKey: "M0AppGroup") as? String ?? ""
-    }
-
     static var isLocalBuild: Bool {
         #if M0_LOCAL
-        true
-        #else
-        false
-        #endif
-    }
-
-    static var isDesktopLocalBuild: Bool {
-        // Both desktop configurations use published local sessions; only DesktopLocal uses an App Group.
-        #if M0_DESKTOP || M0_DISTRIBUTION
         true
         #else
         false
@@ -80,7 +67,6 @@ struct StoreSession: Codable, Equatable, Sendable {
         #endif
     }
 
-
     static func baseURL() throws -> URL {
         if isMacDistributionBuild {
             let fm = FileManager.default
@@ -93,16 +79,10 @@ struct StoreSession: Codable, Equatable, Sendable {
                 userHome: fm.homeDirectoryForCurrentUser
             )
         }
-        if isLocalBuild {
-            let base = try FileManager.default.url(for: .applicationSupportDirectory,
-                                                  in: .userDomainMask, appropriateFor: nil, create: true)
-            return base.appendingPathComponent("TodoM0/Local", isDirectory: true)
-        }
-        guard !groupID.isEmpty,
-              let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) else {
-            throw PrototypeError.unavailable("M0 App Group 不可用，请检查签名与权限。没有另建替代库。")
-        }
-        return group.appendingPathComponent("TodoM0/DesktopLocal", isDirectory: true)
+        guard isLocalBuild else { throw PrototypeError.unavailable("无法确认存储配置，未打开任务库。") }
+        let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                              appropriateFor: nil, create: true)
+        return base.appendingPathComponent("TodoM0/Local", isDirectory: true)
     }
 
     // Resolves one candidate location, without creating a container or claiming OS access to it.
@@ -163,11 +143,11 @@ struct StoreSession: Codable, Equatable, Sendable {
     func legacyLocalDirectory(applicationSupport: URL, arguments: [String]) throws -> URL {
         let run = try Self.distributionRunName(arguments: arguments)
         guard modelVersion == Self.modelVersion,
-              namespace.range(of: "^desktop-[A-Za-z0-9][A-Za-z0-9-]{0,69}\\z", options: .regularExpression) != nil,
-              run == nil || namespace == "desktop-\(run!)", applicationSupport.isFileURL else {
+              namespace.range(of: "^dist-[A-Za-z0-9][A-Za-z0-9-]{0,69}\\z", options: .regularExpression) != nil,
+              run == nil || namespace == "dist-\(run!)", applicationSupport.isFileURL else {
             throw PrototypeError.invalid("无法确认旧版本任务库的对应名称；没有读取其他任务库。")
         }
-        let name = String(namespace.dropFirst("desktop-".count))
+        let name = String(namespace.dropFirst("dist-".count))
         guard name.lowercased() != "manual" || name == "manual" else {
             throw PrototypeError.invalid("旧版本任务库名称与手工库冲突；没有读取手工任务库。")
         }
@@ -191,27 +171,27 @@ struct StoreSession: Codable, Equatable, Sendable {
 
     @discardableResult
     static func blockExtensions() throws -> StoreSession {
-        let run = isMacDistributionBuild ? try distributionRunName(arguments: ProcessInfo.processInfo.arguments) : requestedRunName
+        let run = try distributionRunName(arguments: ProcessInfo.processInfo.arguments)
         let base = try baseURL()
         let previous = FileManager.default.fileExists(atPath: base.appendingPathComponent("session.json").path)
             ? try readPublished(at: base) : nil
-        let namespace = try desktopNamespace(run: run, previous: previous)
+        let namespace = try distributionNamespace(run: run, previous: previous)
         let blocked = StoreSession(modelVersion: modelVersion, namespace: namespace, ready: false)
         try publish(blocked)
         return blocked
     }
 
-    // A cold Widget link has no launch arguments. Keep the last DesktopLocal
+    // A cold Widget link has no launch arguments. Keep the last distribution
     // library even while extensions are blocked.
-    static func desktopNamespace(run: String?, previous: StoreSession?) throws -> String {
+    static func distributionNamespace(run: String?, previous: StoreSession?) throws -> String {
         if let previous {
             guard (1...modelVersion).contains(previous.modelVersion),
-                  previous.namespace.range(of: "^desktop-[a-zA-Z0-9-]{1,70}$", options: .regularExpression) != nil else {
+                  previous.namespace.range(of: "^dist-[a-zA-Z0-9-]{1,70}$", options: .regularExpression) != nil else {
                 throw PrototypeError.unavailable("桌面任务库记录不兼容，原库与草稿已保留。")
             }
         }
-        let namespace = run.map { "desktop-\($0)" } ?? previous?.namespace ?? "desktop-manual"
-        guard namespace.range(of: "^desktop-[a-zA-Z0-9-]{1,70}$", options: .regularExpression) != nil else {
+        let namespace = run.map { "dist-\($0)" } ?? previous?.namespace ?? "dist-manual"
+        guard namespace.range(of: "^dist-[a-zA-Z0-9-]{1,70}$", options: .regularExpression) != nil else {
             throw PrototypeError.invalid("无效的桌面测试库名称。")
         }
         return namespace
@@ -222,7 +202,7 @@ struct StoreSession: Codable, Equatable, Sendable {
         guard let blockedSession, !blockedSession.ready, blockedSession.modelVersion == modelVersion else {
             throw PrototypeError.unavailable("桌面任务库尚未完成本次启动检查。")
         }
-        let namespace = try desktopNamespace(run: nil, previous: blockedSession)
+        let namespace = try distributionNamespace(run: nil, previous: blockedSession)
         return StoreSession(modelVersion: modelVersion, namespace: namespace, ready: true)
     }
 
@@ -235,7 +215,7 @@ struct StoreSession: Codable, Equatable, Sendable {
         guard session.ready, session.modelVersion == modelVersion else {
             throw PrototypeError.unavailable("请先打开主应用完成存储与模型检查。")
         }
-        guard session.namespace.hasPrefix("desktop-"), try readPublished(at: base) == session else {
+        guard session.namespace.hasPrefix("dist-"), try readPublished(at: base) == session else {
             throw PrototypeError.unavailable("桌面任务库已切换，请刷新小组件；没有访问其他任务库。")
         }
         _ = try session.directory()
