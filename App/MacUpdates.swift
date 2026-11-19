@@ -10,18 +10,18 @@ final class MacUpdates: ObservableObject {
     private var helper: Process?
     private var input: FileHandle?
     private var requestedCheck = false
-    @Published private(set) var automatic = UserDefaults.standard.bool(forKey: "SUEnableAutomaticChecks")
+    @Published var automatic = UserDefaults.standard.bool(forKey: "SUEnableAutomaticChecks") {
+        didSet {
+            guard automatic != oldValue else { return }
+            UserDefaults.standard.set(automatic, forKey: "SUEnableAutomaticChecks")
+            if automatic || helper?.isRunning == true { send(automatic ? "Y" : "N") }
+        }
+    }
 
     var available: Bool { FileManager.default.isExecutableFile(atPath: executable.path) }
 
     func startIfEnabled() {
         if available && automatic && helper?.isRunning != true { send("Y") }
-    }
-
-    func setAutomatic(_ enabled: Bool) {
-        automatic = enabled
-        UserDefaults.standard.set(enabled, forKey: "SUEnableAutomaticChecks")
-        if enabled || helper?.isRunning == true { send(enabled ? "Y" : "N") }
     }
 
     func check() {
