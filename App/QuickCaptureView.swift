@@ -36,6 +36,77 @@ struct QuickCaptureView: View {
     }
 }
 
+struct CaptureSheet: View {
+    @Binding var content: TaskWriting
+    @Binding var plan: ScheduleForm
+    let draftStatus: String
+    let loaded: Bool
+    let cancel: () -> Void
+    let save: () -> Void
+    var embedded = false
+    var outsideDismiss: (() -> Bool)? = nil
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var showingDate = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("添加任务").font(.headline)
+                Spacer()
+                Button { TaskWritingEditor.finishEditing(); cancel() } label: { Image(systemName: "xmark") }
+                    .frame(width: 28, height: 28)
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).help("收起并保留草稿")
+                    .accessibilityLabel("收起并保留草稿")
+                    .keyboardShortcut(outsideDismiss == nil ? .cancelAction : nil)
+            }.padding(.horizontal, 20).padding(.vertical, 16)
+            WorkspaceScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    TaskWritingEditor(content: $content, autofocus: true, editable: loaded, minimumHeight: 100,
+                                      placeholder: "任务标题")
+                    Divider()
+                    Button { TaskWritingEditor.finishEditing(); showingDate = true } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "calendar").font(.system(size: 16)).frame(width: 24)
+                            Text(AppStyle.scheduleLabel(plan.schedule)).foregroundStyle(plan.schedule == .none ? Color.secondary : .primary)
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
+                        }.foregroundStyle(.secondary).frame(minHeight: 40)
+                        .contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(!loaded).accessibilityIdentifier("captureDate")
+                        .popover(isPresented: $showingDate) {
+                            TaskDatePopover(schedule: plan.schedule, apply: {
+                                plan = ScheduleForm(schedule: $0); return true
+                            }, close: { showingDate = false })
+                        }
+                    if let error = plan.error { Text(error).font(.caption).foregroundStyle(.red) }
+                    if !draftStatus.isEmpty {
+                        Text(draftStatus).font(.caption).foregroundStyle(draftStatus.contains("失败") || draftStatus.contains("未能") ? Color.red : Color.secondary)
+                    }
+                }.padding(.horizontal, 20).padding(.bottom, 24)
+            }
+            Divider().padding(.horizontal, 20)
+            HStack {
+                Text("换行添加备注").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("添加任务", action: save).font(.body.weight(.semibold))
+                    .buttonStyle(.borderedProminent).tint(AppStyle.accent)
+                    .disabled(!loaded || content.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || plan.error != nil)
+                    .accessibilityIdentifier("captureSave").keyboardShortcut(.return, modifiers: .command)
+            }.padding(20)
+        }
+        .background(embedded ? Color.clear : AppStyle.canvas(colorScheme))
+        .tint(AppStyle.accentText(colorScheme))
+        .environment(\.locale, Locale(identifier: "zh_CN"))
+        .background {
+            if let outsideDismiss {
+                InspectorDismissal(enabled: !showingDate, dismiss: outsideDismiss)
+            }
+        }
+        .frame(minWidth: embedded ? 0 : 380, maxWidth: embedded ? .infinity : 420,
+               minHeight: embedded ? 0 : 380, maxHeight: embedded ? .infinity : 480)
+    }
+}
+
 extension AppModel {
     /// The menu and the global shortcut open capture like the widget's quick capture: unscheduled.
     func openQuickCapture(_ openWindow: OpenWindowAction) {
