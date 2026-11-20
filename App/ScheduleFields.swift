@@ -60,47 +60,6 @@ struct ScheduleForm: Equatable {
     }
 }
 
-struct ScheduleFields: View {
-    @Binding var form: ScheduleForm
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Picker("安排到", selection: $form.placement) {
-                ForEach(ScheduleForm.Placement.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }.accessibilityIdentifier("schedulePlacement")
-            if form.enabled {
-                DatePicker(form.weekly ? "所在周" : "日期", selection: Binding(get: { form.start }, set: {
-                    form.start = $0
-                    if !form.spansDays { form.end = $0 }
-                }), in: dateRange, displayedComponents: [.date])
-                    .accessibilityIdentifier("scheduleStart")
-                if !form.weekly {
-                    Toggle("跨多天", isOn: $form.spansDays).accessibilityIdentifier("scheduleMultipleDays")
-                    if form.spansDays {
-                        DatePicker("至", selection: $form.end, in: dateRange, displayedComponents: [.date])
-                            .accessibilityIdentifier("scheduleEnd")
-                    }
-                }
-                if form.retainsExistingTime {
-                    Text("保留原有时段；更改日期后改为按天安排。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if let error = form.error {
-                    Label(error, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.red)
-                        .accessibilityIdentifier("scheduleValidation")
-                }
-            }
-        }
-        .onChange(of: form.spansDays) { _, multiple in
-            if multiple && form.end < form.start { form.end = form.start }
-        }
-    }
-
-    private var dateRange: ClosedRange<Date> {
-        try! Day("0001-01-01").date(in: .current)...Day("9999-12-30").date(in: .current)
-    }
-}
-
 /// A small, shared month grid for date-only interactions. It intentionally
 /// uses `Day` rather than a system `DatePicker`, so the same surface can be
 /// embedded in a popover without opening a second calendar control.
@@ -468,18 +427,6 @@ struct TaskDatePopover: View {
             }
             failureView
         }
-    }
-
-    private var closeButton: some View {
-        Button {
-            close()
-        } label: {
-            Image(systemName: "xmark")
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("关闭")
-        .accessibilityIdentifier("scheduleClose")
-        .keyboardShortcut(.cancelAction)
     }
 
     private func quickChoice(title: String, detail: String, identifier: String, action: @escaping () -> Void) -> some View {
