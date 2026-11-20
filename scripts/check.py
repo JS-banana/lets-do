@@ -80,8 +80,6 @@ def collect_source_hashes():
         relative = path.relative_to(ROOT)
         if any(part.startswith(".") or part == "xcuserdata" for part in relative.parts) or not path.is_file():
             continue
-        if path.name == "Signing.local.xcconfig":
-            continue
         if (relative.parent == Path("scripts") and path.suffix == ".py" or
                 path.suffix in (".swift", ".m", ".pbxproj", ".xcconfig", ".plist", ".entitlements", ".xcscheme") or
                 path.name == "contents" or
