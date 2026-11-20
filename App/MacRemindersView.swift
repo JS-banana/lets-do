@@ -30,6 +30,21 @@ struct MacReminderImportEntry: View {
     }
 }
 
+/// A paused or blocked sync is otherwise visible only inside Settings, so the settings entry carries it.
+struct MacReminderSettingsHint: View {
+    @ObservedObject var reminders: MacReminders
+
+    var body: some View {
+        if reminders.syncNeedsAttention {
+            Label("提醒事项同步需处理", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption).foregroundStyle(.orange)
+                .accessibilityIdentifier("reminderSyncAttention")
+        } else {
+            Text("本机存储").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
 struct MacReminderImportView: View {
     @ObservedObject var reminders: MacReminders
     @Environment(\.dismiss) private var dismiss

@@ -807,6 +807,14 @@ extension MacRemindersTests {
             let id = UUID()
             try store.createTask(id: id, title: "本机记录尚未读到")
             await tool.setAutoSync(true)
+            XCTAssertFalse(tool.syncNeedsAttention)
+            source.authorized = false
+            await tool.refresh()
+            XCTAssertTrue(tool.autoSync)
+            XCTAssertTrue(tool.syncNeedsAttention)
+            source.authorized = true
+            await tool.refresh()
+            XCTAssertFalse(tool.syncNeedsAttention)
             let reminder = try XCTUnwrap(source.items.first)
             let context = try XCTUnwrap(store.container).viewContext
             context.delete(try record(id, in: store))
@@ -814,6 +822,7 @@ extension MacRemindersTests {
             await tool.refresh()
             XCTAssertEqual(tool.handoffStatus(for: id), .needsReview)
             XCTAssertEqual(tool.syncSummary.needsReview, 1)
+            XCTAssertTrue(tool.syncNeedsAttention)
             XCTAssertEqual(source.items, [reminder])
             source.assertWrites(sends: 1, updates: 0, removes: 0)
         }

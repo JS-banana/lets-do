@@ -321,6 +321,11 @@ final class MacReminders: ObservableObject {
         }
     }
 
+    /// Sync stays on but cannot run, or some links wait for the user's review.
+    var syncNeedsAttention: Bool {
+        autoSync && (!authorized || selectedListID == nil || syncSummary.needsReview > 0)
+    }
+
     var manualCandidates: [MacReminderCandidate] {
         autoSync ? candidates.filter(\.requiresManualImport) : candidates
     }
