@@ -1,38 +1,5 @@
 import SwiftUI
 
-/// A date's tasks stay inside the current calendar, rather than becoming a third workspace.
-struct CalendarDayTasks: View {
-    @ObservedObject var model: AppModel
-    let day: Day
-    let create: () -> Void
-    let close: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Text(AppStyle.dayLabel(day) + " · " + AppStyle.weekdayLabel(day)).font(.headline)
-                Text("\(model.scheduled(on: day).count) 项").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button(action: create) { Image(systemName: "plus") }
-                    .buttonStyle(.plain).accessibilityLabel("在这一天新建任务")
-                Button(action: close) { Image(systemName: "xmark") }
-                    .buttonStyle(.plain).accessibilityLabel("收起当天任务").accessibilityIdentifier("closeDayTasks")
-            }
-            if model.scheduled(on: day).isEmpty {
-                Text("这一天没有安排").foregroundStyle(.secondary).padding(.vertical, 16)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(model.scheduled(on: day)) { task in
-                            TaskAgendaRow(task: task, complete: { model.toggleCompletion(task) }) { model.selection = task.id }
-                        }
-                    }
-                }
-            }
-        }.padding(16).accessibilityIdentifier("dayTasks-\(day.rawValue)")
-    }
-}
-
 struct TaskAgendaRow: View {
     let task: TaskSnapshot
     let complete: () -> Void

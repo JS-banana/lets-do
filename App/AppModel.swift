@@ -104,7 +104,7 @@ final class AppModel: ObservableObject {
                let previousSelection, tasks.contains(where: { $0.id == previousSelection }) {
                 selection = previousSelection
             }
-            status = StoreSession.isLocalBuild ? "独立本地测试库" : "桌面本机任务"
+            status = StoreSession.isLocalBuild ? "独立本地测试库" : "本机任务库"
             loaded = true
             capture.attach(to: opened, tasks: tasks, skipping: unreadableIDs)
             reminders.attach(opened)

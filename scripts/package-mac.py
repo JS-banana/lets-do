@@ -55,8 +55,6 @@ def source_hashes():
         workflow = relative.parts[:2] == (".github", "workflows") and path.suffix in (".yml", ".yaml")
         if (not workflow and any(part.startswith(".") or part == "xcuserdata" for part in relative.parts)) or not path.is_file():
             continue
-        if path.name == "Signing.local.xcconfig":
-            continue
         if (workflow or relative == Path("LICENSE") or relative.parent == Path("scripts") and path.suffix == ".py" or
                 path.suffix in (".swift", ".m", ".pbxproj", ".xcconfig", ".plist", ".entitlements", ".xcscheme") or
                 path.name == "contents" or any(part.endswith(".xcassets") for part in relative.parts)):
