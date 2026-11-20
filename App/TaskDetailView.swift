@@ -3,6 +3,7 @@ import AppKit
 
 struct TaskDetail: View {
     @ObservedObject var model: AppModel
+    @ObservedObject private var reminders: MacReminders
     let task: TaskSnapshot
     var inDrawer = false
     private let editingStore: TaskStore?
@@ -23,6 +24,7 @@ struct TaskDetail: View {
 
     init(model: AppModel, task: TaskSnapshot, inDrawer: Bool = false) {
         self.model = model
+        self.reminders = model.reminders
         self.task = task
         self.inDrawer = inDrawer
         editingStore = model.store
@@ -123,8 +125,8 @@ struct TaskDetail: View {
                             guard hasCurrentStore else { return }
                             model.toggleCompletion(task)
                         }.accessibilityIdentifier("detailCompletion")
-                        if !task.isCompleted {
-                            Button("发送到提醒事项…") {
+                        if !task.isCompleted && (!reminders.autoSync || reminders.handoffStatus(for: task.id) == .needsReview) {
+                            Button(reminders.autoSync ? "提醒事项同步待核对…" : "发送到提醒事项…") {
                                 TaskWritingEditor.finishEditing()
                                 guard persistEditorDraft(), hasCurrentStore else { return }
                                 showingReminderHandoff = true
