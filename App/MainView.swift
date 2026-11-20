@@ -378,8 +378,7 @@ struct MainView: View {
                     Image(systemName: "gearshape").font(.system(size: 17)).frame(width: 24)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("设置").foregroundStyle(.primary)
-                        Text("本机存储")
-                            .font(.caption).foregroundStyle(.secondary)
+                        MacReminderSettingsHint(reminders: model.reminders)
                     }
                     Spacer()
                 }.padding(.horizontal, 18).padding(.vertical, 14).contentShape(Rectangle())
