@@ -191,12 +191,12 @@ struct StoreSession: Codable, Equatable, Sendable {
         if let previous {
             guard (1...modelVersion).contains(previous.modelVersion),
                   validDistributionNamespace(previous.namespace) else {
-                throw AppError.unavailable("桌面任务库记录不兼容，原库与草稿已保留。")
+                throw AppError.unavailable("任务库记录不兼容，原库与草稿已保留。")
             }
         }
         guard let run else { return previous?.namespace ?? "dist-manual" }
         guard validDistributionRunName(run) else {
-            throw AppError.invalid("无效的桌面测试库名称。")
+            throw AppError.invalid("无效的测试库名称。")
         }
         return "dist-\(run)"
     }
@@ -204,7 +204,7 @@ struct StoreSession: Codable, Equatable, Sendable {
     static func forMainApp(blockedSession: StoreSession?) throws -> StoreSession {
         if isLocalBuild { return local() }
         guard let blockedSession, !blockedSession.ready, blockedSession.modelVersion == modelVersion else {
-            throw AppError.unavailable("桌面任务库尚未完成本次启动检查。")
+            throw AppError.unavailable("任务库尚未完成本次启动检查。")
         }
         let namespace = try distributionNamespace(run: nil, previous: blockedSession)
         return StoreSession(modelVersion: modelVersion, namespace: namespace, ready: true)
@@ -212,7 +212,7 @@ struct StoreSession: Codable, Equatable, Sendable {
 
     static func forExtension() throws -> StoreSession {
         guard !isLocalBuild else {
-            throw AppError.unavailable("请使用桌面本机版添加系统小组件。")
+            throw AppError.unavailable("开发版不提供系统小组件，请使用分发版。")
         }
         let base = try baseURL()
         let session = try readPublished(at: base)
@@ -220,7 +220,7 @@ struct StoreSession: Codable, Equatable, Sendable {
             throw AppError.unavailable("请先打开主应用完成存储与模型检查。")
         }
         guard try readPublished(at: base) == session else {
-            throw AppError.unavailable("桌面任务库已切换，请刷新小组件；没有访问其他任务库。")
+            throw AppError.unavailable("任务库已切换，请刷新小组件；没有访问其他任务库。")
         }
         _ = try session.distributionDirectory(at: base)
         return session
