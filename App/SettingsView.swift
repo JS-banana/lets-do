@@ -42,6 +42,8 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Divider()
+                    MacReminderSyncSettings(reminders: model.reminders)
+                    Divider()
                     VStack(alignment: .leading, spacing: 10) {
                         Text("数据").font(.headline)
                         dataActions.buttonStyle(.borderless)
@@ -105,7 +107,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var localStorageSettings: some View {
         Label("本机存储", systemImage: "internaldrive").font(.headline)
-        Text("任务只保存在这台设备，不会上传到 iCloud。需要另存一份时，可以导出 JSON 备份。")
+        Text("任务库保存在这台 Mac 上，可以导出 JSON 备份。")
             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         if !model.loaded {
             Text(model.status).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
