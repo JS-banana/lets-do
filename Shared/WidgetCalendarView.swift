@@ -847,18 +847,6 @@ struct WidgetCalendarView: View {
         }
     }
 
-    private func emptyState(title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-            Text(detail)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-        }
-        .padding(.vertical, 4)
-    }
-
     private func taskRow(_ task: CalendarTask, showDescription: Bool, filled: Bool, lineLimit: Int) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {

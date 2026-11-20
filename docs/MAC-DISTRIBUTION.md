@@ -16,7 +16,7 @@ ad hoc 签名没有 Team ID，Hardened Runtime 默认的库校验会拒绝加载
 
 主应用启动时先阻断扩展，关闭旧连接，打开目标库后才发布就绪会话。会话须通过命名空间和模型版本校验。旧时间线、旧命名空间或启动失败时，保留原库和草稿，拒绝向其他库写入。扩展读写遵循共享的[数据规则](DEVELOPMENT.md#数据规则)。[TaskStore](../Shared/TaskStore.swift)
 
-macOS 14 起，容器访问与代码签名关联，非沙盒应用访问 Widget 容器可能需要授权。不同 ad hoc 构建即使 Bundle ID 和安装路径相同，也要实测覆盖安装后的访问结果。保留 Widget 沙盒和系统保护，容器拒绝时记录错误并验证恢复路径。[Apple 容器访问说明](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox) · [TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
+macOS 14 起，容器访问与代码签名关联，非沙盒应用访问 Widget 容器可能需要授权。不同 ad hoc 构建即使 Bundle ID 和安装路径相同，也要实测覆盖安装后的访问结果。保留 Widget 沙盒和系统保护，容器拒绝时记录错误并验证恢复路径。不得为绕过共享容器问题而移除权限验证、关闭系统保护或重置全局系统登记。[Apple 容器访问说明](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox) · [TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
 
 ## 候选资产验收
 
