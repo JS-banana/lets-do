@@ -676,32 +676,83 @@ extension MacRemindersTests {
         }
     }
 
-    func testOnlyChangedMacFieldsOverwriteAPhoneEdit() async throws {
+    func testPhoneOnlyEditsFollowAndMacWinsWhenBothChanged() async throws {
         try await withList { store, source, tool in
-            let id = UUID(), day = try Day("2026-11-20")
+            let id = UUID(), day = try Day("2026-11-20"), next = day.adding(days: 1)
+            let zone = "Asia/Taipei"
+            let afternoon = day.date(in: try XCTUnwrap(TimeZone(identifier: zone))).addingTimeInterval(15 * 3600)
             try store.createTask(id: id, title: "原名")
             await tool.setAutoSync(true)
-            try store.updateTitle(id: id, title: "Mac 改名")
-            await tool.refresh()
             let sent = try XCTUnwrap(source.items.first)
-            XCTAssertEqual(sent.title, "Mac 改名")
+            source.assertWrites(sends: 1, updates: 0, removes: 0)
+
+            // Only the phone changed: the Mac follows, and the reminder keeps its own time.
+            source.items = [source.item(sent.id, external: sent.externalID, title: "手机改名", notes: "",
+                                        due: .time(afternoon, timeZoneID: zone), marker: sent.marker)]
+            await tool.refresh()
+            var local = try XCTUnwrap(store.snapshots().first)
+            XCTAssertEqual(local.title, "手机改名")
+            XCTAssertEqual(local.schedule, .allDay(start: day, endExclusive: next))
+            try await refreshWithoutTaskWrites(tool, store: store)
+            XCTAssertEqual(source.items.first?.dueLabel, "2026-11-20 15:00 Asia/Taipei")
+            source.assertWrites(sends: 1, updates: 0, removes: 0)
+
+            // Both changed the title: the Mac wins. Both moved to the same day: nothing is written.
+            try store.updateTitle(id: id, title: "Mac 改名")
+            try store.scheduleTask(id: id, schedule: .allDay(start: next, endExclusive: next.adding(days: 1)))
+            source.items = [source.item(sent.id, external: sent.externalID, title: "手机再改", notes: "",
+                                        due: .time(afternoon.addingTimeInterval(86_400), timeZoneID: zone),
+                                        marker: sent.marker)]
+            await tool.refresh()
+            XCTAssertEqual(source.items.first?.title, "Mac 改名")
+            XCTAssertEqual(source.items.first?.dueLabel, "2026-11-21 15:00 Asia/Taipei")
             source.assertWrites(sends: 1, updates: 1, removes: 0)
 
-            let phone = source.item(sent.id, external: sent.externalID, title: "手机改名", notes: "",
-                                    due: .day(day), marker: sent.marker)
-            source.items = [phone]
+            // A changed time on the same day is not a new date; a cleared date unschedules the task.
+            source.items = [source.item(sent.id, external: sent.externalID, title: "Mac 改名", notes: "",
+                                        due: .time(afternoon.addingTimeInterval(90_000), timeZoneID: zone),
+                                        marker: sent.marker)]
+            try await refreshWithoutTaskWrites(tool, store: store)
+            source.items = [source.item(sent.id, external: sent.externalID, title: "Mac 改名", notes: "", marker: sent.marker)]
             await tool.refresh()
-            XCTAssertEqual(source.items, [phone])
-            let local = try XCTUnwrap(store.snapshots().first)
+            local = try XCTUnwrap(store.snapshots().first)
             XCTAssertEqual(local.title, "Mac 改名")
             XCTAssertEqual(local.schedule, .none)
+            try await refreshWithoutTaskWrites(tool, store: store)
             source.assertWrites(sends: 1, updates: 1, removes: 0)
+        }
+    }
 
-            try store.updateTitle(id: id, title: "Mac 再改名")
+    func testAutomaticImportOfAHalfTypedReminderPicksUpItsLaterFields() async throws {
+        try await withList { store, source, tool in
+            let day = try Day("2026-11-21")
+            await tool.setAutoSync(true)
+            // The Reminders apps save a new item before its title and date are complete.
+            let draft = source.item("draft", external: "draft-external", title: "新提醒事项", notes: "")
+            source.items = [draft]
             await tool.refresh()
-            XCTAssertEqual(source.items.first?.title, "Mac 再改名")
-            XCTAssertEqual(source.items.first?.dueDay, day)
-            source.assertWrites(sends: 1, updates: 2, removes: 0)
+            let task = try XCTUnwrap(store.snapshots().first)
+            XCTAssertEqual(task.title, "新提醒事项")
+            let marker = try XCTUnwrap(source.current(draft.id)?.marker)
+            source.assertWrites(sends: 0, updates: 1, removes: 0)
+
+            source.items = [source.item(draft.id, external: draft.externalID, title: "  周五交周报 ", notes: "",
+                                        due: .day(day), marker: marker)]
+            await tool.refresh()
+            let finished = try XCTUnwrap(store.snapshots().first)
+            XCTAssertEqual(finished.id, task.id)
+            XCTAssertEqual(finished.title, "周五交周报")
+            XCTAssertEqual(finished.schedule, .allDay(start: day, endExclusive: day.adding(days: 1)))
+            try await refreshWithoutTaskWrites(tool, store: store)
+            XCTAssertEqual(source.items.first?.title, "  周五交周报 ")
+            source.assertWrites(sends: 0, updates: 1, removes: 0)
+
+            // A blank title on the phone is not pulled.
+            source.items = [source.item(draft.id, external: draft.externalID, title: "   ", notes: "",
+                                        due: .day(day), marker: marker)]
+            try await refreshWithoutTaskWrites(tool, store: store)
+            XCTAssertEqual(try XCTUnwrap(store.snapshots().first).title, "周五交周报")
+            source.assertWrites(sends: 0, updates: 1, removes: 0)
         }
     }
 
@@ -1101,7 +1152,8 @@ extension MacRemindersTests {
             XCTAssertEqual(tool.handoffStatus(for: task.id), .sent)
             XCTAssertEqual(source.items.first?.marker, AppDestination.task(task.id).url)
             XCTAssertEqual(source.items.first?.dueLabel, item.dueLabel)
-            await tool.refresh()
+            try await refreshWithoutTaskWrites(tool, store: store)
+            XCTAssertEqual(try XCTUnwrap(store.snapshots().first).schedule, .none)
             source.assertWrites(sends: 0, updates: 1, removes: 0)
         }
     }
@@ -1363,7 +1415,8 @@ extension MacRemindersTests {
             XCTAssertEqual(link.synced?.due, .day(start))
             XCTAssertEqual(link.synced?.completed, true)
             XCTAssertTrue(link.completionApplied)
-            await tool.refresh()
+            try await refreshWithoutTaskWrites(tool, store: store)
+            XCTAssertEqual(try XCTUnwrap(store.snapshots().first).schedule, .allDay(start: start, endExclusive: start.adding(days: 2)))
             source.assertWrites(sends: 1, updates: 1, removes: 0)
         }
     }
