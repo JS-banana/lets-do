@@ -235,6 +235,14 @@ private struct SyncedState: Codable, Equatable {
     var title: String
     var due: ReminderDue?
     var completed: Bool
+    // The reminder's own due day at the last sync. It may differ from `due` because a linked
+    // reminder keeps its original time or manually chosen day. Absent in links written before 0.4.5.
+    var reminder: ReminderDay?
+}
+
+/// Wraps the day so a reminder without a date differs from a baseline that was never recorded.
+private struct ReminderDay: Codable, Equatable {
+    var day: Day?
 }
 
 struct ReminderSyncSummary: Equatable {
@@ -740,7 +748,7 @@ final class MacReminders: ObservableObject {
                     }
                     try ReminderLinks.update(in: directory) { $0.exports?[id] = nil }
                 } else if let item, item.externalID == export.externalID {
-                    try push(task, export: export, item: item, directory: directory)
+                    try push(task, export: export, item: item, store: store, directory: directory)
                 }
             } catch {
                 try markForReview(id, directory: directory)
@@ -800,23 +808,55 @@ final class MacReminders: ObservableObject {
         }
     }
 
-    private func push(_ task: TaskSnapshot, export: ReminderExport, item: MacReminderCandidate, directory: URL) throws {
+    // Title and date merge per field against the last synchronized state: a field changed on one side
+    // follows that side, and the Mac wins when both changed it. Completion is pulled only by reconcile.
+    // The system Reminders apps save a new reminder field by field, so an early import of a half-typed
+    // reminder picks up the remaining fields here.
+    private func push(_ task: TaskSnapshot, export: ReminderExport, item: MacReminderCandidate,
+                      store: TaskStore, directory: URL) throws {
         let due = Self.reminderDue(for: task.schedule)
         // Initializing a legacy link preserves the deadline previously chosen on the reminder.
         let previous = export.synced ?? SyncedState(title: item.title, due: due, completed: item.completed)
+        // Without a recorded reminder day, take the current one so an upgrade pulls nothing.
+        let reminderDay = previous.reminder.map(\.day) ?? item.dueDay
+        let reminderMoved = item.dueDay != reminderDay
+        var title = task.title, schedule = task.schedule
         var patch = ReminderPatch()
-        if previous.title != task.title { patch.title = task.title }
-        if previous.due != due { patch.due = .some(due) }
+        if task.title != previous.title {
+            if task.title != item.title { patch.title = task.title }
+        } else if item.title != previous.title, let pulled = try? TaskStore.validTitle(item.title) {
+            title = pulled
+        }
+        if due != previous.due {
+            // When both sides moved to the same day, keep the reminder's own time.
+            let sameDay = switch due {
+            case nil: item.dueDay == nil
+            case let .day(day)?: item.dueDay == day
+            case .time?: false
+            }
+            if !(reminderMoved && sameDay) { patch.due = .some(due) }
+        } else if reminderMoved {
+            if let day = item.dueDay {
+                if let end = day.addingIfPossible(days: 1) { schedule = .allDay(start: day, endExclusive: end) }
+            } else {
+                schedule = .none
+            }
+        }
         if previous.completed != task.isCompleted { patch.completed = task.isCompleted }
+        // Pull before writing EventKit: if the push fails, the next round sees both sides agreeing.
+        if title != task.title { try store.updateTitle(id: task.id, title: title) }
+        if schedule != task.schedule { try store.scheduleTask(id: task.id, schedule: schedule) }
+        var saved = item
         if !patch.isEmpty {
-            let saved = try source.update(item.id, expecting: export.scope, marker: export.marker, externalID: item.externalID, patch)
+            saved = try source.update(item.id, expecting: export.scope, marker: export.marker, externalID: item.externalID, patch)
             guard saved.scope == export.scope, saved.marker == export.marker, saved.externalID == item.externalID,
                   patch.title == nil || patch.title == saved.title,
                   patch.completed == nil || patch.completed == saved.completed else {
                 throw AppError.unavailable("提醒事项更新结果待核对，请刷新。")
             }
         }
-        let next = SyncedState(title: task.title, due: due, completed: task.isCompleted)
+        let next = SyncedState(title: title, due: Self.reminderDue(for: schedule), completed: task.isCompleted,
+                               reminder: ReminderDay(day: saved.dueDay))
         if export.synced != next || export.status != .sent {
             try ReminderLinks.update(in: directory) { links in
                 try links.updateExport(task.id) {
@@ -839,7 +879,8 @@ final class MacReminders: ObservableObject {
         if item.title != task.title { patch.title = task.title }
         let due = Self.reminderDue(for: task.schedule)
         var link = ReminderExport(scope: item.scope, marker: marker, due: nil, externalID: item.externalID,
-                                  status: .sent, synced: SyncedState(title: item.title, due: due, completed: item.completed))
+                                  status: .sent, synced: SyncedState(title: item.title, due: due, completed: item.completed,
+                                                                    reminder: ReminderDay(day: item.dueDay)))
         if item.marker == marker && !patch.isEmpty {
             // A recovered marker may have no import reservation. Save its verified identity before editing.
             try saveExport(link, for: task.id, in: directory)
@@ -851,7 +892,8 @@ final class MacReminders: ObservableObject {
         guard saved.marker == marker, saved.externalID == item.externalID, saved.scope == item.scope else {
             throw AppError.unavailable("关联结果待核对，请刷新。")
         }
-        link.synced = SyncedState(title: task.title, due: due, completed: saved.completed)
+        link.synced = SyncedState(title: task.title, due: due, completed: saved.completed,
+                                  reminder: ReminderDay(day: saved.dueDay))
         try saveExport(link, for: task.id, in: directory)
         if saved.completed { refreshQueued = true }
     }
@@ -868,6 +910,7 @@ final class MacReminders: ObservableObject {
         link.externalID = item.externalID
         link.status = .sent
         link.synced = initial
+        link.synced?.reminder = ReminderDay(day: item.dueDay)
         link.pendingCreation = nil
         try saveExport(link, for: task.id, in: directory)
     }
