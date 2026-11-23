@@ -373,7 +373,13 @@ def latest_release(repo):
 
 
 def feed_commit_message(tag, manifest_sha256):
-    return f"Publish update for {tag}\n\nCandidate manifest SHA256: {manifest_sha256}"
+    return f"chore(release): publish update for {tag}\n\nCandidate-manifest-sha256: {manifest_sha256}"
+
+
+def matches_feed_receipt(message, tag, manifest_sha256):
+    # Existing feed commits used this receipt before adopting Conventional Commits.
+    legacy = f"Publish update for {tag}\n\nCandidate manifest SHA256: {manifest_sha256}"
+    return message in (feed_commit_message(tag, manifest_sha256), legacy)
 
 
 def uploaded_manifest_sha256(candidate):
@@ -405,7 +411,7 @@ def plan_feed(repo, release_id):
     # when the feed tip does not already record this exact candidate.
     receipt = run("check-feed-tip", ["git", "for-each-ref", "--format=%(contents)",
                                      f"refs/remotes/origin/{feed.BRANCH}"]).stdout.strip()
-    if receipt == feed_commit_message(tag, manifest_sha256):
+    if matches_feed_receipt(receipt, tag, manifest_sha256):
         print(f"The signed feed already contains {tag}.", file=sys.stderr)
         return
     print(f"tag={tag}\ncommit={commit}\nrelease_id={latest['id']}\nmanifest_sha256={manifest_sha256}")
@@ -435,7 +441,7 @@ def stage_stable_feed(repo, version, private_key, manifest_sha256):
     message = feed_commit_message(version.tag, manifest_sha256)
     if content == previous:
         old_message = run("read-feed-message", ["gh", "api", f"{git}/commits/{base}", "--jq", ".message"]).stdout.strip()
-        if old_message == message:
+        if matches_feed_receipt(old_message, version.tag, manifest_sha256):
             return base, base
 
     # This branch contains only the generated feed. An orphan first commit

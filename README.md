@@ -1,25 +1,26 @@
 <div align="center">
-  <img src="App/Assets.xcassets/AppIcon.appiconset/mac-128@2x.png" width="96" alt="Let’s Do 图标">
+  <img src="App/Assets.xcassets/AppIcon.appiconset/mac-128@2x.png" width="96" alt="Let’s Do app icon">
   <h1>Let’s Do</h1>
-  <p>先记下来，再安排到某一天。</p>
+  <p><strong>English</strong> · <a href="README.zh.md">简体中文</a></p>
+  <p>Capture a task, then pick a day.</p>
   <p>
-    <a href="https://github.com/JS-banana/lets-do/releases/latest"><strong>下载 Mac 预览版</strong></a> ·
-    <a href="docs/USAGE.md">使用指南</a> ·
-    <a href="https://github.com/JS-banana/lets-do/issues">反馈问题</a>
+    <a href="https://github.com/JS-banana/lets-do/releases/latest"><strong>Download the Mac preview</strong></a> ·
+    <a href="docs/USAGE.md">User guide (Chinese)</a> ·
+    <a href="https://github.com/JS-banana/lets-do/issues">Report an issue</a>
   </p>
-  <p><sub>macOS 14 及以上 · Apple 芯片与 Intel · 免费开源</sub></p>
+  <p><sub>macOS 14 or later · Apple silicon and Intel · Free and open source</sub></p>
 </div>
 
-Let’s Do 是一款原生 Mac 任务应用，用日历安排待办，也能借助 Apple「提醒事项」在手机上接着处理。
+Let’s Do is a native Mac task app. Plan your to-dos on a calendar and keep working through them on your phone with Apple Reminders.
 
-![在 Let’s Do 中记录任务、选择日期，再到周历查看安排](docs/images/readme/capture-to-calendar.gif)
+![Capturing a task, picking a date, and seeing it on the weekly calendar in Let’s Do](docs/images/readme/capture-to-calendar.gif)
 
-<p align="center"><sub>真实界面，使用示例任务演示</sub></p>
+<p align="center"><sub>The app in use with sample tasks</sub></p>
 
-- **随手记，按周安排。** Let’s Do 运行时，在其他应用里按 `⌃⌥N` 就能记个标题。日期还没想好就留在待办，也可以先选定一周，等有空时再安排到具体某天。
-- **从桌面处理今天的事。** 「今天」列出当天安排和此前没做完的事。桌面小组件可以看今天、本周或整月的安排，直接勾选完成。
-- **在手机上接着用。** 开启与提醒事项同步后，Mac 上的待办会出现在手机的提醒事项里。在手机上新建或勾选完成，也会回到 Let’s Do。[提醒事项用法](docs/USAGE.md#与手机上的提醒事项配合)
+- **Capture quickly and plan by week.** While Let’s Do is running, press `⌃⌥N` in any app to jot down a task. Leave it unscheduled or assign it to a week and pick a day later.
+- **Work through today’s tasks from your desktop.** Today shows what’s scheduled for today and what you haven’t finished from earlier days. Use desktop widgets to see today, this week, or the whole month and mark tasks complete.
+- **Pick up on your phone.** With Reminders sync enabled, your Mac to-dos appear in Reminders on your phone. Create or complete an item in the synced list on your phone and the change syncs back to Let’s Do. [Use Apple Reminders](docs/USAGE.md#与手机上的提醒事项配合)
 
 ---
 
-[安装与首次打开](docs/USAGE.md#安装与首次打开) · [应用内更新](docs/USAGE.md#更新与反馈) · [参与开发](docs/DEVELOPMENT.md) · [MIT License](LICENSE)
+[Install and open for the first time](docs/USAGE.md#安装与首次打开) · [In-app updates](docs/USAGE.md#更新与反馈) · [Development guide (Chinese)](docs/DEVELOPMENT.md) · [MIT License](LICENSE)

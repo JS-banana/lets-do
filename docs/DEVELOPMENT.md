@@ -4,6 +4,12 @@
 
 使用 macOS 和支持 Swift 6 的完整 Xcode。打开 `Todo.xcodeproj`，选择 `LetsDo` 和 `My Mac` 运行。Mac 部署目标为 macOS 14，检查脚本记录实际使用的 Xcode 版本。常规编译使用系统框架，打包时另行下载并校验独立更新助手使用的固定版 Sparkle。
 
+## 提交与合入
+
+提交说明和 PR 标题用英文，采用 `type(scope): summary` 格式，范围 `scope` 可省略。新增功能用 `feat`，修复用 `fix`，文档用 `docs`，其他类型按实际改动选。遇到不兼容变更，在冒号前加 `!` 或在正文末尾写 `BREAKING CHANGE: <description>`。[Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
+
+PR 用 squash 合入，沿用 PR 标题作为合入提交的标题，正文可补充英文背景及相关引用。GitHub Actions 检查 PR 标题格式，英文表达和类型由审阅时确认。
+
 ## 配置与 scheme
 
 | 配置 | Mac scheme | 主应用 Bundle ID | URL scheme | 任务库 |

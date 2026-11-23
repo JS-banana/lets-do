@@ -1,0 +1,24 @@
+name: Commit message
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  pr-title:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check title format
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^[a-z][a-z0-9-]*(\([^()[:space:]]+\))?!?: [^[:space:]].*$'
+          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+            echo 'Use an English Conventional Commits title, such as feat(reminders): sync tasks with Apple Reminders.' >&2
+            exit 1
+          fi
