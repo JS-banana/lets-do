@@ -1,0 +1,47 @@
+{
+  "v0.1.1": {
+    "manifestSHA256": "2e9b6b32f23eb4097b65d9a519f7cd43e2005993cb9727bb7821af3cde4c3213",
+    "rewrittenCommit": "755029c1ca3d50b96bbdf36bc0a70b6616cf0c46",
+    "sourceCommit": "fe4b0d93a11d6af56deb63c2f53c3ca1cfccb6e0"
+  },
+  "v0.2.0": {
+    "manifestSHA256": "bc8ae2e6c406a09d453a107e050b38be812461e1e51b887758234bf1fdf70977",
+    "rewrittenCommit": "cea866be4a11b7f7e32ed43d89fbba2d8aacee70",
+    "sourceCommit": "c84db0110a9f52c4fb20c72b58b3fa81814bd66a"
+  },
+  "v0.3.0": {
+    "manifestSHA256": "bcf11558a6a650b59c9d5a6dd5ee6e3fb00c630f12d57c9e6e9ff357597d7871",
+    "rewrittenCommit": "f7c803b6025ad9dca807a5fd1131418ca5560f36",
+    "sourceCommit": "608e82cf2a636d30201c2b46d725a08e8b36c1b8"
+  },
+  "v0.3.1": {
+    "manifestSHA256": "d62390116874dee2c769ab94a80e9ada82011db2cf80529f4268ecc817adf267",
+    "rewrittenCommit": "276a5f121af9a3fddf1961dafefd70e4f76f30f1",
+    "sourceCommit": "a349d198adbf1ea9148b0134c42253913561b9f9"
+  },
+  "v0.3.4": {
+    "manifestSHA256": "83fb17fce5c20aee8a36c052d8b4495285add8729c8bf9c9279ebc7bd2d66b9a",
+    "rewrittenCommit": "c2dd2e773516654eb7c6cf7940899ef9033043bc",
+    "sourceCommit": "b1368bfcad5d0d1e338f3199e4941180917d8e70"
+  },
+  "v0.4.3": {
+    "manifestSHA256": "3c02ef3aed681bcde5795918fa85d07905ac0bb8f775407ae985eebd90d04da2",
+    "rewrittenCommit": "cc0efc307d01d5cbc36f9f18b701a1b20c89d45e",
+    "sourceCommit": "96deddb18c7f34f4cf7f7d29267a6f0acb916db0"
+  },
+  "v0.4.4": {
+    "manifestSHA256": "813eff39dea72f67f23a6df3e91d68762114b29c2272077f3333cc6749f44637",
+    "rewrittenCommit": "6d1e823da5715e30591c9b8670ebe91e5433298a",
+    "sourceCommit": "0070680dbf4a7a12567fac8f3ccc784f1eeef6cd"
+  },
+  "v0.4.5": {
+    "manifestSHA256": "2539cf0c9f742fbc24b6d10bdf939bee25859c612f0b4960676bd1f9c7273667",
+    "rewrittenCommit": "ac05b0df668b017644f838fe36313d1a54edc589",
+    "sourceCommit": "37148005972614cba08c18e9ce3795af1283e315"
+  },
+  "v0.4.6": {
+    "manifestSHA256": "d97610b4640f50dfc8dceb4a6a3f3a1c6e788aeec01a6f1a64c59f68b98436bd",
+    "rewrittenCommit": "4aa100f956a2e8e20621d520584046eda7421854",
+    "sourceCommit": "33554a4a72d78ede70d56aa26f6d81468addd63c"
+  }
+}

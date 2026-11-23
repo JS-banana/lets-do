@@ -42,6 +42,8 @@ shasum -a 256 release-manifest.json
 
 记录 manifest 散列、标签和源码提交，安装并验证草稿中的候选。验收和公开必须使用同一组资产，不重建、不重签、不修改 Info 或重传替代资产。[Mac 分发验收规则](MAC-DISTRIBUTION.md#候选资产验收)
 
+Git 历史重写前生成的候选保留原始 manifest 和源码提交。验收时记录 manifest 中的 `sourceCommit`，标签指向源码内容相同的重写后提交。发布器凭标签、新旧提交及 manifest SHA256 四项记录复核既有资产，新打包及上传的候选使用当前源码提交。[历史发行记录](../scripts/release-history-rewrite.json)
+
 草稿仅供有仓库权限的维护者验收。公开记录应说明实际系统、硬件、验证范围和未覆盖项，不上传个人任务库、设备标识或原始私有日志。
 
 ## 公开已验收的草稿

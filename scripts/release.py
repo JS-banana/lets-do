@@ -16,6 +16,7 @@ import mac_update_feed as feed
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REWRITTEN_RELEASES = ROOT / "scripts" / "release-history-rewrite.json"
 VERSION_TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 BUILD_NUMBER = re.compile(r"[1-9][0-9]*")
 BUILD_ANNOTATION = "Let's Do release build: "
@@ -190,7 +191,18 @@ def asset_names(tag):
     return [stem + ".dmg", stem + ".zip", "release-manifest.json", "SHA256SUMS"]
 
 
-def verify_assets(version, commit, asset_dir):
+def matches_rewritten_release_source(tag, commit, source_commit, manifest_sha256):
+    if not REWRITTEN_RELEASES.is_file():
+        return False
+    records = json.loads(REWRITTEN_RELEASES.read_text())
+    return records.get(tag) == {
+        "rewrittenCommit": commit,
+        "sourceCommit": source_commit,
+        "manifestSHA256": manifest_sha256,
+    }
+
+
+def verify_assets(version, commit, asset_dir, *, existing_release=False):
     tag = version.tag
     names = asset_names(tag)
     require(asset_dir.is_dir() and {path.name for path in asset_dir.iterdir()} == set(names),
@@ -198,8 +210,16 @@ def verify_assets(version, commit, asset_dir):
     assets = [asset_dir / name for name in names]
     require(all(path.is_file() and not path.is_symlink() and path.stat().st_size > 0 for path in assets),
             "An asset is missing, empty or a symlink.")
-    manifest = json.loads((asset_dir / "release-manifest.json").read_text())
-    require(manifest.get("sourceCommit") == commit and manifest.get("version") == tag[1:] and
+    manifest_path = asset_dir / "release-manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    source_commit = manifest.get("sourceCommit")
+    # A history rewrite changes the tag's commit ID. A downloaded original
+    # manifest can retain its source ID for an exact, recorded release.
+    source_matches = source_commit == commit or (existing_release and matches_rewritten_release_source(
+        tag, commit, source_commit, manifest_sha256))
+    require(source_matches and manifest.get("version") == tag[1:] and
             manifest.get("build") == version.build_number and
             manifest.get("sourceIsClean") is True and manifest.get("configuration") == "MacDistribution" and
             manifest.get("notarized") is False and manifest.get("widgetIncluded") is True and
@@ -211,7 +231,8 @@ def verify_assets(version, commit, asset_dir):
                 "widgetPresent": True, "widgetSandboxEnabled": True, "modelResourcesPresent": True,
                 "intentMetadataPresent": True, "distributionIdentitiesMatched": True, "dmgVerified": True},
             "The app and Widget package verification is incomplete.")
-    hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in assets}
+    hashes = {path.name: manifest_sha256 if path == manifest_path else hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in assets}
     expected_sums = "".join(f"{hashes[name]}  {name}\n" for name in names[:3])
     require((asset_dir / "SHA256SUMS").read_text() == expected_sums, "Release checksums do not match the assets.")
     require(manifest.get("artifacts") == [{"name": name, "sha256": hashes[name],
@@ -222,7 +243,7 @@ def verify_assets(version, commit, asset_dir):
     source = run("check-updater-source", ["git", "ls-tree", "--name-only", commit, "scripts/sparkle.py"]).stdout
     if source or "sparklePublicEDKey" in manifest:
         feed.candidate_key(assets[1], manifest, repository())
-    return assets, hashes
+    return assets, hashes, source_commit
 
 
 def verify_uploaded(release, assets, hashes):
@@ -244,22 +265,23 @@ def download_candidate(repo, version, commit, candidate):
     for name in asset_names(tag):
         command.extend(["--pattern", name])
     run("download-candidate", command)
-    assets, hashes = verify_assets(version, commit, asset_dir)
+    assets, hashes, source_commit = verify_assets(version, commit, asset_dir, existing_release=True)
     verify_uploaded(candidate, assets, hashes)
-    return hashes
+    return hashes, source_commit
 
 
-def report_candidate(release, version, commit, manifest_sha256):
+def report_candidate(release, version, commit, manifest_sha256, *, source_commit=None):
     tag = version.tag
+    source_commit = source_commit if source_commit is not None else commit
     print(f"Candidate {tag} (build {version.build_number}): {release['html_url']}\n"
-          f"Source commit: {commit}\nCandidate manifest SHA256: {manifest_sha256}")
+          f"Source commit: {source_commit}\nCandidate manifest SHA256: {manifest_sha256}")
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         guide = f"https://github.com/{repository()}/blob/{commit}/docs/MAC-DISTRIBUTION.md#候选资产验收"
         with Path(summary).open("a") as stream:
             stream.write(f"## Mac release candidate {tag}\n\n"
                          f"- [Download the four assets from the draft]({release['html_url']})\n"
                          f"- Build number `{version.build_number}`\n"
-                         f"- Source commit `{commit}`\n"
+                         f"- Source commit `{source_commit}`\n"
                          f"- Manifest SHA256 `{manifest_sha256}`\n\n"
                          f"Use the [Mac acceptance checklist]({guide}) before publishing.\n")
 
@@ -303,7 +325,7 @@ def bind_draft_tag(endpoint, draft, tag):
 def prepare(version, commit, asset_dir):
     tag = version.tag
     repo = repository()
-    assets, hashes = verify_assets(version, commit, asset_dir)
+    assets, hashes, _ = verify_assets(version, commit, asset_dir)
     existing = release_info(repo, tag)
     ref = f"refs/tags/{tag}"
     refs = remote_refs(ref, ref + "^{}")
@@ -315,8 +337,9 @@ def prepare(version, commit, asset_dir):
     if existing is not None:
         require(object_sha is not None, "The existing release has a missing tag.")
         if existing["draft"]:
-            existing_hashes = download_candidate(repo, version, commit, existing)
-            report_candidate(existing, version, commit, existing_hashes["release-manifest.json"])
+            existing_hashes, source_commit = download_candidate(repo, version, commit, existing)
+            report_candidate(existing, version, commit, existing_hashes["release-manifest.json"],
+                             source_commit=source_commit)
         else:
             print(f"Release {tag} is already published: {existing['html_url']}")
         return
@@ -496,7 +519,7 @@ def publish(version, commit, manifest_sha256, make_latest, private_key, publishe
                 "The selected Latest release must already be public and stable.")
         require(uploaded_manifest_sha256(candidate) == manifest_sha256, "The candidate manifest changed before signing.")
     require(candidate is not None, "An existing release candidate is required.")
-    hashes = download_candidate(repo, version, commit, candidate)
+    hashes, _ = download_candidate(repo, version, commit, candidate)
     require(hashes["release-manifest.json"] == manifest_sha256, "Candidate assets differ from the runtime-verified manifest.")
     staged_feed = stage_stable_feed(repo, version, private_key, manifest_sha256) if make_latest else None
     current = release_info(repo, tag)

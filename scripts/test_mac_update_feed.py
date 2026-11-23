@@ -2,11 +2,14 @@
 """Exercise Latest release selection and signing with a disposable Sparkle key."""
 import base64
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
+import hashlib
 from io import StringIO
+import json
 import os
 from pathlib import Path
 import plistlib
 import secrets
+import shutil
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -138,7 +141,7 @@ class WebReleaseTest(unittest.TestCase):
              patch.object(release, "remote_refs", return_value={f"refs/tags/{self.version.tag}": self.commit}), \
              patch.object(release, "tagged_version", return_value=self.version), \
              patch.object(release, "release_info", return_value=self.latest), \
-             patch.object(release, "download_candidate", return_value={"release-manifest.json": self.digest}), \
+             patch.object(release, "download_candidate", return_value=({"release-manifest.json": self.digest}, self.commit)), \
              patch.object(release, "stage_stable_feed", return_value=(None, self.commit)), \
              patch.object(release, "advance_stable_feed") as advance, \
              patch.object(release, "run") as command:
@@ -151,6 +154,99 @@ class WebReleaseTest(unittest.TestCase):
                 release.publish(self.version, self.commit, self.digest, True, "", published_id=23)
             advance.assert_not_called()
             command.assert_not_called()  # An already published release never needs a PATCH.
+
+
+class RewrittenReleaseTest(unittest.TestCase):
+    repo = "JS-banana/lets-do"
+    version = release.ReleaseVersion("v0.4.5", "18", True)
+    commit = "a" * 40
+    source_commit = "b" * 40
+
+    def setUp(self):
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        self.directory = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        self.original = self.directory / "original"
+        self.candidate = self.write_assets(self.original, self.source_commit)
+        self.manifest_sha256 = next(asset["digest"].removeprefix("sha256:") for asset in self.candidate["assets"]
+                                    if asset["name"] == "release-manifest.json")
+        self.records = self.directory / "release-history-rewrite.json"
+        self.record = {"rewrittenCommit": self.commit, "sourceCommit": self.source_commit,
+                       "manifestSHA256": self.manifest_sha256}
+        self.records.write_text(json.dumps({self.version.tag: self.record}))
+        stack.enter_context(patch.object(release, "REWRITTEN_RELEASES", self.records))
+        stack.enter_context(patch.object(release, "repository", return_value=self.repo))
+        stack.enter_context(patch.object(release, "run", side_effect=self.run_command))
+
+    def write_assets(self, directory, source_commit):
+        directory.mkdir()
+        names = release.asset_names(self.version.tag)
+        for name in names[:2]:
+            (directory / name).write_bytes(name.encode())
+        digest = lambda name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
+        manifest = {"sourceCommit": source_commit, "version": self.version.tag[1:], "build": self.version.build_number,
+                    "sourceIsClean": True, "configuration": "MacDistribution", "notarized": False,
+                    "widgetIncluded": True, "cloudEnabled": False, "signatureType": "ad-hoc",
+                    "architectures": {"app": ["arm64", "x86_64"], "widget": ["arm64", "x86_64"]},
+                    "verification": {key: True for key in (
+                        "strictDeepSignature", "certificateAbsent", "sharedGroupEntitlementsAbsent", "getTaskAllowAbsent",
+                        "debugDylibsAbsent", "widgetPresent", "widgetSandboxEnabled", "modelResourcesPresent",
+                        "intentMetadataPresent", "distributionIdentitiesMatched", "dmgVerified")},
+                    "artifacts": [{"name": name, "sha256": digest(name), "bytes": (directory / name).stat().st_size}
+                                  for name in names[:2]]}
+        (directory / "release-manifest.json").write_text(json.dumps(manifest))
+        (directory / "SHA256SUMS").write_text("".join(f"{digest(name)}  {name}\n" for name in names[:3]))
+        return {"tag_name": self.version.tag, "draft": True, "html_url": "https://github.com/example/release",
+                "assets": [{"name": name, "state": "uploaded", "digest": "sha256:" + digest(name),
+                            "size": (directory / name).stat().st_size} for name in names]}
+
+    def run_command(self, name, command):
+        if name == "download-candidate":
+            destination = Path(command[command.index("--dir") + 1])
+            for path in self.original.iterdir():
+                shutil.copyfile(path, destination / path.name)
+        else:
+            self.assertEqual(name, "check-updater-source")
+        return SimpleNamespace(stdout="")
+
+    def download(self):
+        with tempfile.TemporaryDirectory(dir=self.directory) as logs, patch.object(release, "logs", Path(logs)):
+            return release.download_candidate(self.repo, self.version, self.commit, self.candidate)
+
+    def test_download_requires_the_exact_tag_and_record_and_intact_assets(self):
+        hashes, source_commit = self.download()
+        self.assertEqual((hashes["release-manifest.json"], source_commit), (self.manifest_sha256, self.source_commit))
+        mismatches = [{"v0.4.6": self.record}] + [
+            {self.version.tag: {**self.record, key: "0" * len(value)}} for key, value in self.record.items()]
+        for records in mismatches:
+            with self.subTest(records=records), self.assertRaisesRegex(RuntimeError, "validated source"):
+                self.records.write_text(json.dumps(records))
+                self.download()
+        self.records.write_text(json.dumps({self.version.tag: self.record}))
+        archive = self.original / release.asset_names(self.version.tag)[0]
+        archive.write_bytes(b"changed archive")
+        with self.assertRaisesRegex(RuntimeError, "checksums"):
+            self.download()
+
+    def test_preparing_new_assets_requires_the_current_commit(self):
+        with patch.object(release, "release_info") as lookup, self.assertRaisesRegex(RuntimeError, "validated source"):
+            release.prepare(self.version, self.commit, self.original)
+        lookup.assert_not_called()
+
+    def test_existing_draft_reports_the_manifest_source_and_links_the_rewritten_commit(self):
+        incoming = self.directory / "incoming"
+        self.write_assets(incoming, self.commit)
+        summary = self.directory / "summary.md"
+        output = StringIO()
+        with patch.object(release, "logs", self.directory), redirect_stdout(output), \
+             patch.object(release, "release_info", return_value=self.candidate), \
+             patch.object(release, "remote_refs", return_value={f"refs/tags/{self.version.tag}": self.commit}), \
+             patch.object(release, "tagged_version", return_value=self.version), \
+             patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}):
+            release.prepare(self.version, self.commit, incoming)
+        self.assertIn(f"Source commit: {self.source_commit}", output.getvalue())
+        self.assertIn(f"Source commit `{self.source_commit}`", summary.read_text())
+        self.assertIn(f"/{self.commit}/docs/MAC-DISTRIBUTION.md", summary.read_text())
 
 
 if __name__ == "__main__":
