@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>Let’s Do</title>
+    <sparkle:bundleIdentifier>com.panion.letsdo</sparkle:bundleIdentifier>
+    <item>
+      <title>Let’s Do v0.4.6</title>
+      <sparkle:version>19</sparkle:version>
+      <sparkle:shortVersionString>0.4.6</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <link>https://github.com/JS-banana/lets-do/releases/tag/v0.4.6</link>
+      <description>&lt;a href="https://github.com/JS-banana/lets-do/releases/tag/v0.4.6"&gt;查看 v0.4.6 的发行说明&lt;/a&gt;</description>
+      <enclosure url="https://github.com/JS-banana/lets-do/releases/download/v0.4.6/lets-do-0.4.6-macos-universal.zip" length="6570978" type="application/octet-stream" sparkle:edSignature="tChNwMMBPSHQSYfLF0ORU2KrmkuqvJqSolGsnSWU5HRTJn7dlHkbQocFZebRCF682fcbF5UjnPoa18VljDh7Ag=="></enclosure>
+    </item>
+  </channel>
+</rss><!-- sparkle-signatures:
+edSignature: r/AsSk2b6DSQs+u7WkFTFNm4IJdKipcHwClplNq8LJejJYu4XiELDGmN6lRriJCnBYlB1J2jPFW8d/KxE6wnAQ==
+length: 1276
+-->
