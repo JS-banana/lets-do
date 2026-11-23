@@ -22,4 +22,4 @@ Let’s Do 是一款原生 Mac 任务应用，用日历安排待办，也能借�
 
 ---
 
-[安装与首次打开](docs/USAGE.md#安装与首次打开) · [参与开发](docs/DEVELOPMENT.md) · [MIT License](LICENSE)
+[安装与首次打开](docs/USAGE.md#安装与首次打开) · [应用内更新](docs/USAGE.md#更新与反馈) · [参与开发](docs/DEVELOPMENT.md) · [MIT License](LICENSE)
