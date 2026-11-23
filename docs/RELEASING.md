@@ -46,7 +46,9 @@ shasum -a 256 release-manifest.json
 
 ## 公开已验收的草稿
 
-在 Actions 中手动运行 `Release preview`，选择 `main`：
+**从 GitHub 网页发布。** 验收后在 Releases 打开对应草稿，点 **Edit** 编辑发行说明。发布正式版时，取消 **Set as a pre-release**，选中 **Set as the latest release**，再点 **Publish release**。在 Actions 的 [Mac update feed](https://github.com/JS-banana/lets-do/actions/workflows/mac-update-feed.yml) 查看应用内更新清单的同步结果。保留预发布选项即可只公开预览下载。
+
+**从 Actions 发布。** 也可以在 `main` 手动运行 `Release preview`。这条路径在公开草稿前核对验收时记录的 manifest 散列，并为正式版预先签好更新清单。
 
 | 输入 | 填写内容 |
 |---|---|
@@ -57,7 +59,7 @@ shasum -a 256 release-manifest.json
 
 发布器下载现有候选资产，重新核对源码、版本、构建号、manifest、归档散列及远端资产身份，确认 manifest 散列与输入一致后，直接公开同一个草稿。勾选 Latest 时，运行摘要会在 GitHub 确认 Latest 后给出链接。资产或标签发生变化、候选缺失或散列不符时停止。
 
-发布流程串行运行，避免同时分配同一个版本。只有上传草稿和公开发行的任务获得 `contents: write`，使用 GitHub 自带的 `GITHUB_TOKEN`。自动创建标签后在同一轮运行上传草稿。
+候选准备、Actions 发版和更新清单写入共用并发组 `mac-release`。网页发布本身由 GitHub 立即完成，应用内可用时间以清单同步成功为准。
 
 ## Mac 应用内更新
 
@@ -71,7 +73,9 @@ sparkle_tools="$(python3 scripts/sparkle.py)"
 "$sparkle_tools/bin/generate_keys" --account lets-do -p
 ```
 
-**日常发布。** 照上节通过 Release preview 公开已验收的草稿，勾选 `make_latest`。工作流用私钥签署原 ZIP 与更新清单，在确认 GitHub 的 Latest 指向该版本后，推进 `mac-updates` 分支上的 `appcast.xml`。客户端通过固定的 HTTPS 地址读取并验证清单和 ZIP。草稿和预发布版不会触发推送。使用 Releases 网页按钮不会执行这段流程；若已手动设为 Latest，可用同一标签和 manifest SHA256 补跑工作流。公开成功后若推送清单失败，同样补跑。已有清单必须能用当前密钥验证；更换密钥需要单独规划已安装用户的迁移。
+**清单同步。** 网页发布后，`Mac update feed` 只处理 GitHub 当前的正式 Latest。它核对四份资产均由 GitHub Actions 上传，以 GitHub 记录的 manifest SHA256 校验下载内容，复核标签、源码和归档，再签署原 ZIP 与清单。写入 `mac-updates/appcast.xml` 前会再次确认 Latest 及其资产。客户端用包内公钥验证清单和 ZIP。两种发布方式都保留已有清单的验签与构建号防回退检查。
+
+**旧草稿和重试。** GitHub 从发行标签读取发布事件工作流。早于此功能的草稿（包括 v0.4.5）在网页设为 Latest 后，由 `main` 上每小时一次的检查补同步。需要立即同步或修复失败后重试时，可在 `main` 手动运行 `Mac update feed`，无需填写参数或重新发版。相同候选已同步时只读检查即结束。更换签名密钥需要单独规划已安装用户的迁移。[GitHub 发布事件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release)
 
 **升级验收。** 在独立 macOS 测试用户中，使用同一测试公钥的两个连续构建。从可写的安装目录打开旧版，记录任务和未提交草稿，通过测试用已签名清单发现新版，点击安装、退出并重开。核对新应用和 Widget 的实际版本、原任务与草稿、Widget 刷新；损坏 ZIP 或错误签名应保留可运行的旧版。测试密钥与正式分发分开，正式清单只推送同一份已验收的候选。
 

@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION_TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 BUILD_NUMBER = re.compile(r"[1-9][0-9]*")
 BUILD_ANNOTATION = "Let's Do release build: "
+ACTIONS_BOT_ID = 41898282  # github-actions[bot] on github.com
 
 
 class ReleaseVersion(NamedTuple):
@@ -31,6 +32,8 @@ parser = argparse.ArgumentParser(description=__doc__)
 commands = parser.add_subparsers(dest="command", required=True)
 plan_command = commands.add_parser("plan", help="Resolve a candidate from a successful main CI commit.")
 plan_command.add_argument("--commit", required=True)
+feed_command = commands.add_parser("plan-feed", help="Check whether the public Latest release needs a signed feed.")
+feed_command.add_argument("--release-id", type=int, help="Only consider this published release event.")
 for name in ("validate", "package", "prepare", "publish"):
     command = commands.add_parser(name)
     command.add_argument("--tag", required=True)
@@ -41,10 +44,9 @@ for name in ("validate", "package", "prepare", "publish"):
     elif name == "publish":
         command.add_argument("--manifest-sha256", required=True, help="SHA256 of the candidate manifest used for runtime acceptance.")
         command.add_argument("--make-latest", action="store_true", help="Publish as a regular release and set it as Latest.")
-args = parser.parse_args()
+        command.add_argument("--published-id", type=int, help="Only synchronize an already public Latest release with this ID.")
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 logs = ROOT / ".build" / "release" / stamp
-logs.mkdir(parents=True, exist_ok=False)
 log_index = 0
 
 
@@ -361,8 +363,56 @@ def prepare(version, commit, asset_dir):
                 run("delete-failed-draft", ["gh", "api", "--method", "DELETE", f"{endpoint}/{release_id}"], allowed_failure=True)
 
 
-def stage_stable_feed(repo, version, private_key):
-    """Prepare the signed Git tree before making an accepted release public."""
+def latest_release(repo):
+    result = run("read-latest", ["gh", "api", f"repos/{repo}/releases/latest"], allowed_failure=True)
+    if result.returncode:
+        if result.stdout and json.loads(result.stdout).get("status") == "404":
+            return None
+        raise RuntimeError("Could not read the Latest release from GitHub.")
+    return json.loads(result.stdout)
+
+
+def feed_commit_message(tag, manifest_sha256):
+    return f"Publish update for {tag}\n\nCandidate manifest SHA256: {manifest_sha256}"
+
+
+def uploaded_manifest_sha256(candidate):
+    # The release publisher can edit notes. Only CI uploads authorize signing.
+    assets = {asset["name"]: asset for asset in candidate["assets"]}
+    require(candidate.get("author", {}).get("id") == ACTIONS_BOT_ID and
+            set(assets) == set(asset_names(candidate["tag_name"])) and
+            all(asset.get("uploader", {}).get("id") == ACTIONS_BOT_ID and asset.get("state") == "uploaded"
+                for asset in assets.values()), "Latest must be the candidate created and uploaded by GitHub Actions.")
+    digest = assets["release-manifest.json"].get("digest") or ""
+    require(re.fullmatch(r"sha256:[0-9a-f]{64}", digest), "GitHub did not provide the candidate manifest SHA256.")
+    return digest.removeprefix("sha256:")
+
+
+def plan_feed(repo, release_id):
+    latest = latest_release(repo)
+    if latest is None or (release_id is not None and latest["id"] != release_id):
+        print("No matching Latest release.", file=sys.stderr)
+        return
+    tag = latest["tag_name"]
+    require(latest["draft"] is False and latest["prerelease"] is False, "Expected a public stable release.")
+    commit, _ = validate_tag(tag)
+    if not run("check-updater-source", ["git", "ls-tree", "--name-only", commit, "scripts/sparkle.py"]).stdout:
+        print(f"{tag} predates in-app updates.", file=sys.stderr)
+        return
+
+    manifest_sha256 = uploaded_manifest_sha256(latest)
+    # The read-only job uses a fresh full checkout. Only start a signing runner
+    # when the feed tip does not already record this exact candidate.
+    receipt = run("check-feed-tip", ["git", "for-each-ref", "--format=%(contents)",
+                                     f"refs/remotes/origin/{feed.BRANCH}"]).stdout.strip()
+    if receipt == feed_commit_message(tag, manifest_sha256):
+        print(f"The signed feed already contains {tag}.", file=sys.stderr)
+        return
+    print(f"tag={tag}\ncommit={commit}\nrelease_id={latest['id']}\nmanifest_sha256={manifest_sha256}")
+
+
+def stage_stable_feed(repo, version, private_key, manifest_sha256):
+    """Prepare the signed Git tree for the verified candidate."""
     ref = "refs/heads/" + feed.BRANCH
     base = remote_refs(ref).get(ref)
     assets = logs / "candidate-assets"
@@ -381,10 +431,13 @@ def stage_stable_feed(repo, version, private_key):
         previous = base64.b64decode(blob["content"])
     tool_dir = run("prepare-sparkle", [sys.executable, "scripts/sparkle.py"]).stdout.strip()
     content = feed.signed_feed(Path(tool_dir) / "bin/sign_update", private_key, archive, key, version, repo, logs, previous)
-    if content == previous:
-        return base, base
-
     git = f"repos/{repo}/git"
+    message = feed_commit_message(version.tag, manifest_sha256)
+    if content == previous:
+        old_message = run("read-feed-message", ["gh", "api", f"{git}/commits/{base}", "--jq", ".message"]).stdout.strip()
+        if old_message == message:
+            return base, base
+
     # This branch contains only the generated feed. An orphan first commit
     # works without a pre-created branch, Pages configuration, or a deploy key.
     tree_file = logs / "feed-tree.json"
@@ -395,7 +448,7 @@ def stage_stable_feed(repo, version, private_key):
     tree_file.write_text(json.dumps(tree_request))
     tree = json.loads(run("stage-feed-tree", ["gh", "api", f"{git}/trees", "--input", str(tree_file)]).stdout)
     commit_file = logs / "feed-commit.json"
-    commit_file.write_text(json.dumps({"message": f"Publish update for {version.tag}", "tree": tree["sha"],
+    commit_file.write_text(json.dumps({"message": message, "tree": tree["sha"],
                                       "parents": [base] if base else []}))
     commit = json.loads(run("stage-feed-commit", ["gh", "api", f"{git}/commits", "--input", str(commit_file)]).stdout)
     require(re.fullmatch(r"[0-9a-f]{40}", commit.get("sha", "")), "Invalid staged update feed commit.")
@@ -418,18 +471,28 @@ def advance_stable_feed(repo, staged):
     require(remote_refs(ref).get(ref) == commit, "The published update feed could not be confirmed.")
 
 
-def publish(version, commit, manifest_sha256, make_latest, private_key):
+def publish(version, commit, manifest_sha256, make_latest, private_key, published_id=None):
     require(re.fullmatch(r"[0-9a-f]{64}", manifest_sha256), "Provide the SHA256 of the runtime-verified candidate manifest.")
     tag = version.tag
     repo = repository()
     ref = f"refs/tags/{tag}"
     refs = remote_refs(ref, ref + "^{}")
     require(tagged_version(refs, tag, commit) == version, "The release version changed before publication.")
-    candidate = release_info(repo, tag)
+    if published_id is None:
+        candidate = release_info(repo, tag)
+    else:
+        require(make_latest, "Feed synchronization requires a Latest release.")
+        candidate = latest_release(repo)
+        if candidate is None or candidate["id"] != published_id:
+            print("Latest changed while this synchronization was queued.")
+            return
+        require(candidate["tag_name"] == tag and candidate["draft"] is False and candidate["prerelease"] is False,
+                "The selected Latest release must already be public and stable.")
+        require(uploaded_manifest_sha256(candidate) == manifest_sha256, "The candidate manifest changed before signing.")
     require(candidate is not None, "An existing release candidate is required.")
     hashes = download_candidate(repo, version, commit, candidate)
     require(hashes["release-manifest.json"] == manifest_sha256, "Candidate assets differ from the runtime-verified manifest.")
-    staged_feed = stage_stable_feed(repo, version, private_key) if make_latest else None
+    staged_feed = stage_stable_feed(repo, version, private_key, manifest_sha256) if make_latest else None
     current = release_info(repo, tag)
     require(current is not None and current.get("id") == candidate["id"] and current.get("draft") == candidate["draft"],
             "The candidate changed during verification.")
@@ -451,10 +514,11 @@ def publish(version, commit, manifest_sha256, make_latest, private_key):
             published.get("draft") is False and published.get("prerelease") is prerelease and
             identity(published) == identity(candidate),
             "GitHub did not confirm the requested publication state.")
-    if make_latest:
-        latest = json.loads(run("verify-latest", ["gh", "api", f"repos/{repo}/releases/latest"]).stdout)
-        require(latest.get("id") == published["id"], "GitHub did not confirm this release as Latest.")
     require(remote_refs(ref).get(ref) == refs[ref], "The remote tag changed during publication.")
+    if make_latest:
+        latest = latest_release(repo)
+        require(latest and latest["id"] == published["id"] and identity(latest) == identity(candidate),
+                "GitHub did not confirm these release assets as Latest.")
     if staged_feed:
         advance_stable_feed(repo, staged_feed)
     mode = "Latest" if make_latest else "a prerelease"
@@ -471,8 +535,13 @@ def print_candidate_outputs(version, commit):
 
 
 def main():
+    args = parser.parse_args()
+    logs.mkdir(parents=True, exist_ok=False)
     # Only the pinned Sparkle signer receives this value via standard input.
     private_key = os.environ.pop("SPARKLE_PRIVATE_ED_KEY", "").strip()
+    if args.command == "plan-feed":
+        plan_feed(repository(), args.release_id)
+        return
     if args.command == "plan":
         version = plan_candidate(args.commit)
         if version is not None:
@@ -500,15 +569,16 @@ def main():
     elif args.command == "prepare":
         prepare(version, resolved, args.asset_dir)
     else:
-        publish(version, resolved, args.manifest_sha256, args.make_latest, private_key)
+        publish(version, resolved, args.manifest_sha256, args.make_latest, private_key, args.published_id)
 
 
-try:
-    main()
-except RuntimeError as error:
-    # RuntimeError messages above are deliberately authored without raw command output.
-    print("Release step failed: " + str(error), file=sys.stderr)
-    sys.exit(1)
-except (Exception, KeyboardInterrupt):
-    print("Release step failed. Check the tag/version/main ancestry and local .build/release logs. Raw logs are not release assets.", file=sys.stderr)
-    sys.exit(1)
+if __name__ == "__main__":
+    try:
+        main()
+    except RuntimeError as error:
+        # RuntimeError messages above are deliberately authored without raw command output.
+        print("Release step failed: " + str(error), file=sys.stderr)
+        sys.exit(1)
+    except (Exception, KeyboardInterrupt):
+        print("Release step failed. Check the tag/version/main ancestry and local .build/release logs. Raw logs are not release assets.", file=sys.stderr)
+        sys.exit(1)

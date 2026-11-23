@@ -1,0 +1,68 @@
+name: Mac update feed
+
+on:
+  release:
+    types: [published, released, edited]
+  # Release events use the tagged workflow, which older drafts do not contain.
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: >-
+      (github.event_name == 'release' && !github.event.release.draft && !github.event.release.prerelease) ||
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.latest.outputs.tag }}
+      commit: ${{ steps.latest.outputs.commit }}
+      release-id: ${{ steps.latest.outputs.release_id }}
+      manifest-sha256: ${{ steps.latest.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compare Latest with the signed feed
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ github.event.release.id }}
+        run: |
+          args=()
+          if [[ -n "$RELEASE_ID" ]]; then args+=(--release-id "$RELEASE_ID"); fi
+          python3 scripts/release.py plan-feed "${args[@]}" >> "$GITHUB_OUTPUT"
+
+  sync:
+    needs: check
+    if: needs.check.outputs.tag != ''
+    concurrency:
+      group: mac-release
+      queue: max
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the published candidate and synchronize the signed feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+          RELEASE_TAG: ${{ needs.check.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.check.outputs.commit }}
+          RELEASE_ID: ${{ needs.check.outputs.release-id }}
+          MANIFEST_SHA256: ${{ needs.check.outputs.manifest-sha256 }}
+        run: |
+          python3 scripts/release.py publish --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
+            --published-id "$RELEASE_ID" --manifest-sha256 "$MANIFEST_SHA256" --make-latest
