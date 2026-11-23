@@ -101,7 +101,12 @@ class WebReleaseTest(unittest.TestCase):
         self.assertEqual(self.plan(), expected)  # Existing tag without a published-event workflow.
         self.assertEqual(self.plan(event_id=22), "")
         self.assertEqual(self.plan(source=""), "")
-        self.assertEqual(self.plan(receipt=release.feed_commit_message(self.version.tag, self.digest)), "")
+        receipt = f"chore(release): publish update for {self.version.tag}\n\nCandidate-manifest-sha256: {self.digest}"
+        self.assertEqual(release.feed_commit_message(self.version.tag, self.digest), receipt)
+        self.assertEqual(self.plan(receipt=receipt), "")
+        legacy = f"Publish update for {self.version.tag}\n\nCandidate manifest SHA256: {self.digest}"
+        self.assertEqual(self.plan(receipt=legacy), "")
+        self.assertEqual(self.plan(receipt=legacy.replace(self.digest, "0" * 64)), expected)
         self.latest = None
         self.assertEqual(self.plan(), "")
 
